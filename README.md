@@ -1,23 +1,28 @@
 # Autonomous Search-and-Rescue Navigation (`robot_core`)
 
-An autonomous navigation system for search-and-rescue robotics developed for Cal Hacks. The system combines real-time RF/sensor target triangulation with a custom **Streamline Artificial Potential Field (APF)** algorithm to navigate complex, unknown disaster environments (collapsed structures, multi-layered mazes, and office partitions) without requiring pre-mapped global grids.
+An autonomous navigation system for search-and-rescue robotics developed for Cal Hacks. The system combines real-time RF/sensor target triangulation, computer vision, and ultrasonic sensing with a custom **Streamline Artificial Potential Field (APF)** algorithm to navigate complex, unknown disaster environments (collapsed structures, multi-layered mazes, and office partitions) without requiring pre-mapped global grids.
 
 ---
 
 ## 📌 Table of Contents
 1. [Project Overview & Architecture](#1-project-overview--architecture)
+   - [System Pipeline](#system-pipeline)
+   - [Modular Documentation](#modular-documentation)
 2. [The Navigation Algorithm](#2-the-navigation-algorithm)
    - [Why Artificial Potential Fields (APF)?](#why-artificial-potential-fields-apf)
    - [Mathematical Formulation](#mathematical-formulation)
    - [Overcoming Classic APF Failure Modes](#overcoming-classic-apf-failure-modes)
-3. [System & Development Environment](#3-system--development-environment)
+3. [Environment & Setup: Why ROS 2?](#3-environment--setup-why-ros-2)
+   - [Why ROS 2 for Search-and-Rescue?](#why-ros-2-for-search-and-rescue)
+   - [Setting Up ROS 2 (Docker vs. Native)](#setting-up-ros-2-docker-vs-native)
 4. [Installation & Build](#4-installation--build)
 5. [Running the System](#5-running-the-system)
    - [Testing Scenarios in Simulation](#testing-scenarios-in-simulation)
    - [Scenario Visual Maps & Edge Cases](#scenario-visual-maps--edge-cases)
    - [Terminal Map Visualizer](#terminal-map-visualizer)
 6. [ROS 2 Topic Interfaces](#6-ros-2-topic-interfaces)
-7. [Repository Structure](#7-repository-structure)
+7. [Sub-Guides & Documentation](#7-sub-guides--documentation)
+8. [Repository Structure](#8-repository-structure)
 
 ---
 
@@ -27,33 +32,46 @@ In emergency search-and-rescue operations, robots must locate trapped victims th
 
 ### System Pipeline
 The robotic system is divided into three decoupled ROS 2 nodes:
-1. **The Eyes (`sensor_node`)**: Triangulates the victim's location through walls using an ESP radar/RF array and publishes coordinates to `/target_location`. In simulation or testing, ultrasonic sensors/cameras report local wall proximity to `/obstacle_status`.
+1. **The Eyes (`sensor_node` / `vision_obstacle_node`)**: Fuses through-wall ESP RF triangulation, ultrasonic rangefinding, and USB camera computer vision to sense walls and visually identify human victims.
 2. **The Brain (`navigator_node`)**: Subscribes to the target coordinates and sensor readings, computes real-time APF vector fields, and issues smooth motion commands to `/cmd_vel`.
 3. **The Body (`motor_node` / `mock_robot_sim`)**: Differential drive base that executes `geometry_msgs/Twist` motor commands and publishes odometry to `/odom`.
 
 ```text
-                  +----------------------------------+
-                  |           THE EYES               |
-                  |  ESP Sensor Array / Ultrasonics  |
-                  +-----------------+----------------+
-                                    |
-            /target_location (Point)|  /obstacle_status (Vector3)
-                                    v
-                  +----------------------------------+
-                  |           THE BRAIN              |
-                  |        navigator_node.py         |
-                  |   (Streamline APF + Memory)      |
-                  +-----------------+----------------+
-                                    |
-                    /cmd_vel (Twist)|
-                                    v
-                  +----------------------------------+
-                  |           THE BODY               |
-                  |    Motor Node / Mock Sim         |
-                  +-----------------+----------------+
-                                    | /odom (Odometry)
-                                    +---------------> (Feedback Loop)
+                  +----------------------------------------------+
+                  |                  THE EYES                    |
+                  |  - ESP Array (Through-Wall Triangulation)    |
+                  |  - Ultrasonic Rangefinders (Direct Distance) |
+                  |  - RGB Camera (Canny Edges & HOG Person Det) |
+                  +-----------------------+----------------------+
+                                          |
+                  /target_location (Point)|  /obstacle_status (Vector3)
+                  (Victim Coordinates)    |  (Front/Left/Right Clearances)
+                                          v
+                  +----------------------------------------------+
+                  |                  THE BRAIN                   |
+                  |              navigator_node.py               |
+                  |     - Attraction Pull & Terminal Decel       |
+                  |     - Steep Embankment Repulsion             |
+                  |     - Canal Streamline Bypass Flow           |
+                  |     - Local Corridor Exploration Memory      |
+                  +-----------------------+----------------------+
+                                          |
+                          /cmd_vel (Twist)| (Linear & Angular Velocity)
+                                          v
+                  +----------------------------------------------+
+                  |                  THE BODY                    |
+                  |         Motor Node / Mock Simulator          |
+                  +-----------------------+----------------------+
+                                          | /odom (Odometry)
+                                          +---------------------> (Feedback Loop)
 ```
+
+---
+
+### Modular Documentation
+To keep the system modular and maintain clean separation of concerns, documentation is split into two focused guides:
+1. **Path Planning & Navigation (This Document)**: Artificial Potential Field (APF) physics, streamline bypass, local minima breakout, ROS 2 environment setup, and simulation edge cases.
+2. **Computer Vision & Perception ([docs/VISION_README.md](docs/VISION_README.md))**: Logitech webcam setup on Linux/Docker, vision model selection (YOLOv8-Nano vs. MobileNet vs. HOG), floor edge segmentation, and person detection.
 
 ---
 
@@ -152,63 +170,114 @@ When front wall detected (F_rep_front > 0.05):
 
 ---
 
-## 3. System & Development Environment
+## 3. Environment & Setup: Why ROS 2?
 
-- **Host Architecture**: ASUS Ascent GX10 (ARM64)
-- **Host OS**: Ubuntu / Linux
-- **Remote Access**: Tailscale Remote-SSH
-- **Containerization**: Docker (`ros:humble` base image)
-- **ROS 2 Distribution**: ROS 2 Humble Hawksbill
-- **Build System**: `colcon` with `--symlink-install`
-- **Container Workspace Mapping**: `/home/asus/calhacks` mapped to `/workspace` inside Docker.
+### Why ROS 2 for Search-and-Rescue?
+We chose **ROS 2 Humble Hawksbill** as our robotics middleware for four architectural reasons:
+1. **Decoupled Heterogeneous Nodes**: The vision node (Python/OpenCV), sensor arrays (ESP microcontrollers via micro-ROS/serial), and motor controllers run as independent processes. If the camera frame-rate dips, the navigator and safety collision monitors continue executing at their deterministic 10Hz/20Hz rates without stutter.
+2. **Standardized Robotics Schemas**: Using standard `geometry_msgs` (`Point`, `Vector3`, `Twist`) and `nav_msgs` (`Odometry`) allows seamless swapping between the physical soccer robot hardware and the terminal physics simulator without altering any brain code.
+3. **Data Distribution Service (DDS)**: Low-latency inter-process communication allows sensor data to propagate in microseconds across the ASUS Ascent GX10 edge processor.
+4. **ARM64 Native Support**: Clean deployment on embedded ARM64 boards (ASUS Ascent GX10, Jetson, Raspberry Pi).
+
+---
+
+### Setting Up ROS 2 (Docker vs. Native)
+
+#### Option A: Docker Setup (Recommended)
+Docker ensures an identical, reproducible environment with all ROS 2 dependencies and OpenCV pre-configured:
+
+```bash
+# 1. Pull the official ROS 2 Humble image
+docker pull ros:humble
+
+# 2. Launch container with host networking and workspace mounted
+sudo docker run -it \
+  --net=host \
+  --device=/dev/video0 \
+  -v /home/asus/calhacks:/workspace \
+  -w /workspace \
+  ros:humble bash
+```
+
+#### Option B: Native Ubuntu 22.04 Setup
+If running directly on Ubuntu 22.04 LTS without Docker:
+
+```bash
+# 1. Set locale
+sudo apt update && sudo apt install locales
+sudo locale-gen en_US en_US.UTF-8
+sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+export LANG=en_US.UTF-8
+
+# 2. Add ROS 2 apt repository
+sudo apt install software-properties-common curl -y
+sudo add-apt-repository universe
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+# 3. Install ROS 2 Humble Base + Development Tools
+sudo apt update && sudo apt install -y \
+  ros-humble-ros-base \
+  python3-colcon-common-extensions \
+  python3-pip \
+  python3-opencv
+
+# 4. Source ROS 2 in your shell
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
 
 ---
 
 ## 4. Installation & Build
 
-### 1. Enter the Docker Container
-From the host system:
-```bash
-# Start container (if not already running)
-sudo docker run -it --net=host -v /home/asus/calhacks:/workspace -w /workspace ros:humble bash
+Inside the workspace (`/workspace` or `/home/asus/calhacks`):
 
-# Or attach to an already running container
-sudo docker exec -it $(sudo docker ps -q | head -n 1) bash
-```
-
-### 2. Build the ROS 2 Workspace
-Inside the container:
 ```bash
-cd /workspace
+# 1. Source ROS 2 environment
+source /opt/ros/humble/setup.bash
+
+# 2. Build the workspace using symlink-install
 colcon build --symlink-install
+
+# 3. Source the built package
 source install/setup.bash
 ```
 
-> **Note**: `--symlink-install` links the Python source files directly to the install directory. When you edit `.py` files in `src/`, changes take effect immediately upon restarting the node without requiring a full rebuild.
+> **Why `--symlink-install`?**  
+> Links the Python files in `src/robot_core/robot_core/` directly to `install/`. When you tune parameters or edit logic in `navigator_node.py` or `vision_obstacle_node.py`, the changes take effect immediately on next run without rebuilding!
 
 ---
 
 ## 5. Running the System
 
-Open **two terminal sessions** inside the container:
+### Launching Perception & Navigation
 
-### Terminal 1: Launch the Simulator
+For full autonomous operation with vision and navigation, open multiple terminal windows:
+
+#### Terminal 1: Simulation Physics & Map
 ```bash
-source /workspace/install/setup.bash
-ros2 run robot_core mock_robot_sim --ros-args -p scenario:=multilayer
+source install/setup.bash
+ros2 run robot_core mock_robot_sim --ros-args -p scenario:=office
 ```
 
-### Terminal 2: Launch the Navigator
+#### Terminal 2: APF Brain (Navigator)
 ```bash
-source /workspace/install/setup.bash
+source install/setup.bash
 ros2 run robot_core navigator_node
+```
+
+#### Terminal 3: Edge AI Vision Node (Optional - with camera attached)
+```bash
+source install/setup.bash
+ros2 run robot_core vision_obstacle_node
 ```
 
 ---
 
 ### Testing Scenarios in Simulation
 
-Select any scenario using the `scenario` parameter:
+Select any test scenario using the `scenario` parameter:
 
 | Scenario Name | Command Flag | Layout & Test Objective |
 |:---|:---|:---|
@@ -373,18 +442,32 @@ The simulator includes a high-speed ASCII real-time map renderer in the terminal
 
 | Topic | Message Type | Direction | Description |
 |:---|:---|:---|:---|
-| `/target_location` | `geometry_msgs/Point` | Input to Navigator | Victim's world coordinates (X, Y) published by sensor array. |
+| `/target_location` | `geometry_msgs/Point` | Input to Navigator | Victim's world coordinates (X, Y) published by sensor array or vision node. |
 | `/odom` | `nav_msgs/Odometry` | Input to Navigator | Current robot pose (X, Y, θ) from wheel encoders. |
-| `/obstacle_status` | `geometry_msgs/Vector3` | Input to Navigator | Ultrasonic/vision obstacle distance (`x` = front, `y` = left, `z` = right in meters). |
+| `/obstacle_status` | `geometry_msgs/Vector3` | Input to Navigator | Fused obstacle clearances (`x` = front, `y` = left, `z` = right in meters). |
+| `/ultrasonic_raw` | `geometry_msgs/Vector3` | Input to Vision | Raw ultrasonic distances before sensor fusion. |
+| `/detected_person` | `geometry_msgs/Point` | Output from Vision | Relative victim position (`x` = distance, `y` = lateral offset, `z` = confidence). |
 | `/cmd_vel` | `geometry_msgs/Twist` | Output from Navigator | Velocity drive commands (`linear.x` in m/s, `angular.z` in rad/s). |
 
 ---
 
-## 7. Repository Structure
+## 7. Sub-Guides & Documentation
+
+- **[docs/VISION_README.md](docs/VISION_README.md)**: Dedicated Computer Vision & Sensor Perception guide.
+  - Logitech webcam setup on Linux and Docker pass-through.
+  - Vision model recommendations (YOLOv8-Nano vs. MobileNet vs. HOG) for real-time victim detection.
+  - Floor ROI edge detection for cardboard/concrete walls.
+  - Distance estimation via pinhole projection and ROS 2 target updating.
+
+---
+
+## 8. Repository Structure
 
 ```text
 calhacks/
-├── README.md                                  # Complete system documentation & visual maps
+├── README.md                                  # Core navigation, APF & simulation guide
+├── docs/
+│   └── VISION_README.md                       # Dedicated Computer Vision & sensor perception guide
 ├── src/
 │   └── robot_core/
 │       ├── package.xml                        # ROS 2 package configuration
@@ -394,7 +477,7 @@ calhacks/
 │           ├── __init__.py
 │           ├── navigator_node.py              # APF Brain (attraction, repulsion, memory, bypass)
 │           ├── mock_robot_sim.py              # Physics engine, CCD, raycaster & ASCII renderer
-│           └── vision_obstacle_node.py        # Vision/camera sensor processing node
+│           └── vision_obstacle_node.py        # Vision & ultrasonic sensor fusion node
 ├── install/                                   # Colcon symlink-installed artifacts
 └── build/                                     # Colcon intermediate build files
 ```
