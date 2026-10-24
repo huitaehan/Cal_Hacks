@@ -1,0 +1,29 @@
+[0.204s] Invoking command in '/workspace/src/robot_core': PYTHONPATH=/workspace/build/robot_core/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/install/robot_core/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/robot_core build --build-base /workspace/build/robot_core/build install --record /workspace/build/robot_core/install.log --install-scripts $base/lib/robot_core --single-version-externally-managed install_data
+[0.285s] running egg_info
+[0.285s] writing ../../build/robot_core/robot_core.egg-info/PKG-INFO
+[0.285s] writing dependency_links to ../../build/robot_core/robot_core.egg-info/dependency_links.txt
+[0.285s] writing entry points to ../../build/robot_core/robot_core.egg-info/entry_points.txt
+[0.285s] writing requirements to ../../build/robot_core/robot_core.egg-info/requires.txt
+[0.285s] writing top-level names to ../../build/robot_core/robot_core.egg-info/top_level.txt
+[0.286s] reading manifest file '../../build/robot_core/robot_core.egg-info/SOURCES.txt'
+[0.286s] writing manifest file '../../build/robot_core/robot_core.egg-info/SOURCES.txt'
+[0.286s] running build
+[0.286s] running build_py
+[0.286s] copying robot_core/mock_robot_sim.py -> /workspace/build/robot_core/build/lib/robot_core
+[0.286s] copying robot_core/navigator_node.py -> /workspace/build/robot_core/build/lib/robot_core
+[0.286s] running install
+[0.286s] running install_lib
+[0.286s] copying /workspace/build/robot_core/build/lib/robot_core/mock_robot_sim.py -> /workspace/install/robot_core/lib/python3.10/site-packages/robot_core
+[0.286s] copying /workspace/build/robot_core/build/lib/robot_core/navigator_node.py -> /workspace/install/robot_core/lib/python3.10/site-packages/robot_core
+[0.287s] byte-compiling /workspace/install/robot_core/lib/python3.10/site-packages/robot_core/mock_robot_sim.py to mock_robot_sim.cpython-310.pyc
+[0.288s] byte-compiling /workspace/install/robot_core/lib/python3.10/site-packages/robot_core/navigator_node.py to navigator_node.cpython-310.pyc
+[0.289s] running install_data
+[0.289s] running install_egg_info
+[0.289s] removing '/workspace/install/robot_core/lib/python3.10/site-packages/robot_core-0.0.0-py3.10.egg-info' (and everything under it)
+[0.289s] Copying ../../build/robot_core/robot_core.egg-info to /workspace/install/robot_core/lib/python3.10/site-packages/robot_core-0.0.0-py3.10.egg-info
+[0.290s] running install_scripts
+[0.298s] Installing mock_robot_sim script to /workspace/install/robot_core/lib/robot_core
+[0.298s] Installing navigator_node script to /workspace/install/robot_core/lib/robot_core
+[0.298s] Installing vision_obstacle_node script to /workspace/install/robot_core/lib/robot_core
+[0.298s] writing list of installed files to '/workspace/build/robot_core/install.log'
+[0.308s] Invoked command in '/workspace/src/robot_core' returned '0': PYTHONPATH=/workspace/build/robot_core/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/install/robot_core/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/robot_core build --build-base /workspace/build/robot_core/build install --record /workspace/build/robot_core/install.log --install-scripts $base/lib/robot_core --single-version-externally-managed install_data

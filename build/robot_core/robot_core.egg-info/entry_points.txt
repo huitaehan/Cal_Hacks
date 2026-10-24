@@ -1,3 +1,5 @@
 [console_scripts]
-
+mock_robot_sim = robot_core.mock_robot_sim:main
+navigator_node = robot_core.navigator_node:main
+vision_obstacle_node = robot_core.vision_obstacle_node:main
 

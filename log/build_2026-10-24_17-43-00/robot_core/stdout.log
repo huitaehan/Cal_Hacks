@@ -1,0 +1,27 @@
+running egg_info
+writing ../../build/robot_core/robot_core.egg-info/PKG-INFO
+writing dependency_links to ../../build/robot_core/robot_core.egg-info/dependency_links.txt
+writing entry points to ../../build/robot_core/robot_core.egg-info/entry_points.txt
+writing requirements to ../../build/robot_core/robot_core.egg-info/requires.txt
+writing top-level names to ../../build/robot_core/robot_core.egg-info/top_level.txt
+reading manifest file '../../build/robot_core/robot_core.egg-info/SOURCES.txt'
+writing manifest file '../../build/robot_core/robot_core.egg-info/SOURCES.txt'
+running build
+running build_py
+copying robot_core/mock_robot_sim.py -> /workspace/build/robot_core/build/lib/robot_core
+copying robot_core/navigator_node.py -> /workspace/build/robot_core/build/lib/robot_core
+running install
+running install_lib
+copying /workspace/build/robot_core/build/lib/robot_core/mock_robot_sim.py -> /workspace/install/robot_core/lib/python3.10/site-packages/robot_core
+copying /workspace/build/robot_core/build/lib/robot_core/navigator_node.py -> /workspace/install/robot_core/lib/python3.10/site-packages/robot_core
+byte-compiling /workspace/install/robot_core/lib/python3.10/site-packages/robot_core/mock_robot_sim.py to mock_robot_sim.cpython-310.pyc
+byte-compiling /workspace/install/robot_core/lib/python3.10/site-packages/robot_core/navigator_node.py to navigator_node.cpython-310.pyc
+running install_data
+running install_egg_info
+removing '/workspace/install/robot_core/lib/python3.10/site-packages/robot_core-0.0.0-py3.10.egg-info' (and everything under it)
+Copying ../../build/robot_core/robot_core.egg-info to /workspace/install/robot_core/lib/python3.10/site-packages/robot_core-0.0.0-py3.10.egg-info
+running install_scripts
+Installing mock_robot_sim script to /workspace/install/robot_core/lib/robot_core
+Installing navigator_node script to /workspace/install/robot_core/lib/robot_core
+Installing vision_obstacle_node script to /workspace/install/robot_core/lib/robot_core
+writing list of installed files to '/workspace/build/robot_core/install.log'

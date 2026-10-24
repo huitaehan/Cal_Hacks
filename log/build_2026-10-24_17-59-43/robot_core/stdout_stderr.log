@@ -1,0 +1,20 @@
+running develop
+running egg_info
+writing robot_core.egg-info/PKG-INFO
+writing dependency_links to robot_core.egg-info/dependency_links.txt
+writing entry points to robot_core.egg-info/entry_points.txt
+writing requirements to robot_core.egg-info/requires.txt
+writing top-level names to robot_core.egg-info/top_level.txt
+reading manifest file 'robot_core.egg-info/SOURCES.txt'
+writing manifest file 'robot_core.egg-info/SOURCES.txt'
+running build_ext
+Creating /workspace/install/robot_core/lib/python3.10/site-packages/robot-core.egg-link (link to .)
+Installing mock_robot_sim script to /workspace/install/robot_core/lib/robot_core
+Installing navigator_node script to /workspace/install/robot_core/lib/robot_core
+Installing vision_obstacle_node script to /workspace/install/robot_core/lib/robot_core
+
+Installed /workspace/build/robot_core
+running symlink_data
+symbolically linking /workspace/build/robot_core/resource/robot_core -> /workspace/install/robot_core/share/ament_index/resource_index/packages
+symbolically linking /workspace/build/robot_core/package.xml -> /workspace/install/robot_core/share/robot_core
+symbolically linking /workspace/build/robot_core/launch/sim_test.launch.py -> /workspace/install/robot_core/share/robot_core/launch

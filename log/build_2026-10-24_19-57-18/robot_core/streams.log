@@ -1,0 +1,19 @@
+[0.299s] Invoking command in '/workspace/build/robot_core': PYTHONPATH=/workspace/build/robot_core/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/install/robot_core/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /workspace/build/robot_core/build --no-deps symlink_data
+[0.376s] running develop
+[0.403s] running egg_info
+[0.404s] writing robot_core.egg-info/PKG-INFO
+[0.404s] writing dependency_links to robot_core.egg-info/dependency_links.txt
+[0.404s] writing entry points to robot_core.egg-info/entry_points.txt
+[0.404s] writing requirements to robot_core.egg-info/requires.txt
+[0.404s] writing top-level names to robot_core.egg-info/top_level.txt
+[0.404s] reading manifest file 'robot_core.egg-info/SOURCES.txt'
+[0.404s] writing manifest file 'robot_core.egg-info/SOURCES.txt'
+[0.404s] running build_ext
+[0.404s] Creating /workspace/install/robot_core/lib/python3.10/site-packages/robot-core.egg-link (link to .)
+[0.406s] Installing mock_robot_sim script to /workspace/install/robot_core/lib/robot_core
+[0.406s] Installing navigator_node script to /workspace/install/robot_core/lib/robot_core
+[0.406s] Installing vision_obstacle_node script to /workspace/install/robot_core/lib/robot_core
+[0.406s] 
+[0.406s] Installed /workspace/build/robot_core
+[0.406s] running symlink_data
+[0.420s] Invoked command in '/workspace/build/robot_core' returned '0': PYTHONPATH=/workspace/build/robot_core/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/install/robot_core/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /workspace/build/robot_core/build --no-deps symlink_data
