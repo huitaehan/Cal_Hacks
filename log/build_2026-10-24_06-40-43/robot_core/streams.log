@@ -1,0 +1,33 @@
+[0.208s] Invoking command in '/workspace/src/robot_core': PYTHONPATH=/workspace/build/robot_core/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/install/robot_core/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/robot_core build --build-base /workspace/build/robot_core/build install --record /workspace/build/robot_core/install.log --install-scripts $base/lib/robot_core --single-version-externally-managed install_data
+[0.276s] running egg_info
+[0.276s] creating ../../build/robot_core/robot_core.egg-info
+[0.276s] writing ../../build/robot_core/robot_core.egg-info/PKG-INFO
+[0.276s] writing dependency_links to ../../build/robot_core/robot_core.egg-info/dependency_links.txt
+[0.276s] writing entry points to ../../build/robot_core/robot_core.egg-info/entry_points.txt
+[0.276s] writing requirements to ../../build/robot_core/robot_core.egg-info/requires.txt
+[0.276s] writing top-level names to ../../build/robot_core/robot_core.egg-info/top_level.txt
+[0.276s] writing manifest file '../../build/robot_core/robot_core.egg-info/SOURCES.txt'
+[0.277s] reading manifest file '../../build/robot_core/robot_core.egg-info/SOURCES.txt'
+[0.277s] writing manifest file '../../build/robot_core/robot_core.egg-info/SOURCES.txt'
+[0.277s] running build
+[0.277s] running build_py
+[0.277s] creating /workspace/build/robot_core/build
+[0.277s] creating /workspace/build/robot_core/build/lib
+[0.277s] creating /workspace/build/robot_core/build/lib/robot_core
+[0.277s] copying robot_core/__init__.py -> /workspace/build/robot_core/build/lib/robot_core
+[0.277s] running install
+[0.277s] running install_lib
+[0.278s] creating /workspace/install/robot_core/lib/python3.10/site-packages/robot_core
+[0.278s] copying /workspace/build/robot_core/build/lib/robot_core/__init__.py -> /workspace/install/robot_core/lib/python3.10/site-packages/robot_core
+[0.278s] byte-compiling /workspace/install/robot_core/lib/python3.10/site-packages/robot_core/__init__.py to __init__.cpython-310.pyc
+[0.278s] running install_data
+[0.278s] creating /workspace/install/robot_core/share/ament_index
+[0.278s] creating /workspace/install/robot_core/share/ament_index/resource_index
+[0.278s] creating /workspace/install/robot_core/share/ament_index/resource_index/packages
+[0.278s] copying resource/robot_core -> /workspace/install/robot_core/share/ament_index/resource_index/packages
+[0.278s] copying package.xml -> /workspace/install/robot_core/share/robot_core
+[0.278s] running install_egg_info
+[0.279s] Copying ../../build/robot_core/robot_core.egg-info to /workspace/install/robot_core/lib/python3.10/site-packages/robot_core-0.0.0-py3.10.egg-info
+[0.279s] running install_scripts
+[0.288s] writing list of installed files to '/workspace/build/robot_core/install.log'
+[0.300s] Invoked command in '/workspace/src/robot_core' returned '0': PYTHONPATH=/workspace/build/robot_core/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/install/robot_core/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/robot_core build --build-base /workspace/build/robot_core/build install --record /workspace/build/robot_core/install.log --install-scripts $base/lib/robot_core --single-version-externally-managed install_data
