@@ -20,17 +20,17 @@ class NavigatorNode(Node):
         # -----------------------------
         # ROS 2 Parameters (Tunable in real-time)
         # -----------------------------
-        self.declare_parameter('k_att', 0.5)                     # Attraction scaling factor
-        self.declare_parameter('k_rep', 2.20)                    # Canal bank repulsion scaling factor
-        self.declare_parameter('danger_zone', 0.55)              # Canal embankment width (meters)
-        self.declare_parameter('max_repulsion_force', 8.0)       # Maximum repulsion clamp
-        self.declare_parameter('max_linear_vel', 0.25)           # Max forward speed (m/s)
-        self.declare_parameter('max_angular_vel', 1.40)          # Max rotation speed (rad/s)
-        self.declare_parameter('goal_tolerance', 0.15)           # Target arrival radius (meters)
-        self.declare_parameter('kp_angular', 2.0)                # Proportional gain for steering towards resultant
-        self.declare_parameter('boredom_threshold_speed', 0.05)  # Speed below which robot is considered stalled
-        self.declare_parameter('boredom_trigger_time', 2.5)      # Seconds stalled before triggering escape
-        self.declare_parameter('escape_duration', 1.5)           # Seconds to execute escape turn
+        self.declare_parameter('k_att', 0.40)                    # Attraction scaling factor
+        self.declare_parameter('k_rep', 1.20)                    # Canal bank repulsion scaling factor
+        self.declare_parameter('danger_zone', 0.40)              # Doubled danger zone: 40 cm
+        self.declare_parameter('max_repulsion_force', 3.0)       # Maximum repulsion clamp
+        self.declare_parameter('max_linear_vel', 0.015)          # Ultra-calm smooth crawl (0.015 m/s)
+        self.declare_parameter('max_angular_vel', 0.028)         # Gentle, controlled rotation speed (0.028 rad/s)
+        self.declare_parameter('goal_tolerance', 0.20)           # Target arrival radius (meters)
+        self.declare_parameter('kp_angular', 0.40)               # Soft proportional steering towards resultant
+        self.declare_parameter('boredom_threshold_speed', 0.01)  # Speed below which robot is considered stalled
+        self.declare_parameter('boredom_trigger_time', 15.0)     # Seconds stalled before triggering escape
+        self.declare_parameter('escape_duration', 0.5)           # Seconds to execute escape turn
 
         # -----------------------------
         # Subscriptions
@@ -90,13 +90,13 @@ class NavigatorNode(Node):
         # -----------------------------
         # Internal State
         # -----------------------------
-        # Default to Exploration Mode with dead-reckoning so robot navigates out-of-the-box
-        self.target_x = 4.0
+        # Initial State: Autonomous Exploration mode (starts moving immediately forward and navigates around walls)
+        self.target_x = 2.0
         self.target_y = 0.0
         self.has_target = True
         self.has_odom = True
         self.using_internal_odom = True
-        self.mode = "EXPLORATION"  # "EXPLORATION", "VICTIM_PURSUIT", or "TARGET_PURSUIT"
+        self.mode = "EXPLORATION"  # "EXPLORATION", "TARGET_PURSUIT", or "VICTIM_PURSUIT"
 
         self.robot_x = 0.0
         self.robot_y = 0.0
@@ -107,34 +107,33 @@ class NavigatorNode(Node):
         self.left_dist = 2.0
         self.right_dist = 2.0
 
-        # Boredom & Local Minima Escape State
+        # Dedicated 90-Degree Wall Avoidance Controller (Strictly caps turn to 1/4 of 360: ~90 deg)
+        self.is_avoiding_wall = False
+        self.avoid_turn_dir = 1.0
+        self.avoid_turn_time = 0.0
+        self.avoid_cooldown = 0.0
         self.stalled_time = 0.0
-        self.is_escaping = False
-        self.escape_timer = 0.0
-        self.escape_angular_dir = 1.0  # +1 = left, -1 = right
 
-        # Exploration Memory & Pacing Trap Detection
+        # Exploration Memory
         self.visited_grid = {}        # (cell_x, cell_y) -> visit count
-        self.pos_history = []         # [(time, x, y), ...]
-        self.forced_bypass_dir = 0.0  # +1.0 for Left/Up, -1.0 for Right/Down
-        self.forced_bypass_timer = 0.0
 
         # 10Hz Control Loop (0.1s interval)
         self.dt = 0.1
         self.timer = self.create_timer(self.dt, self.control_loop)
-        self.get_logger().info("Artificial Potential Field Navigator Node initialized (Autonomous Exploration Active).")
+        self.get_logger().info("APF Navigator initialized in EXPLORATION (v=0.015 m/s, ultra-calm 50cm buffer)...")
 
     # -----------------------------
     # Callbacks
     # -----------------------------
     def victim_callback(self, msg: Point):
         # msg: x=dist_meters, y=bearing_deg, z=confidence
-        if msg.z >= 0.35 and msg.x > 0.2:
+        # Only pursue victim if explicitly in VICTIM_PURSUIT mode and confidence is high
+        if self.mode == "VICTIM_PURSUIT" and msg.z >= 0.70 and msg.x > 0.3:
             bearing_rad = math.radians(msg.y)
             abs_theta = self.robot_theta + bearing_rad
             self.target_x = self.robot_x + msg.x * math.cos(abs_theta)
             self.target_y = self.robot_y + msg.x * math.sin(abs_theta)
-            self.mode = "VICTIM_PURSUIT"
+            self.has_target = True
             self.get_logger().info(
                 f"Victim sighted at {msg.x:.2f}m ({msg.y:.1f} deg)! Navigating to target ({self.target_x:.2f}, {self.target_y:.2f})"
             )
@@ -160,10 +159,9 @@ class NavigatorNode(Node):
             if math.hypot(new_x - self.robot_x, new_y - self.robot_y) > 0.80:
                 self.get_logger().info("Simulation restart / robot teleport detected! Resetting navigation memory.")
                 self.visited_grid.clear()
-                self.pos_history.clear()
-                self.forced_bypass_timer = 0.0
                 self.stalled_time = 0.0
-                self.is_escaping = False
+                self.is_avoiding_wall = False
+                self.avoid_turn_time = 0.0
 
         self.robot_x = new_x
         self.robot_y = new_y
@@ -183,24 +181,39 @@ class NavigatorNode(Node):
         self.has_odom = True
 
     def obstacle_callback(self, msg: Vector3):
-        self.front_dist = msg.x
-        self.left_dist = msg.y
-        self.right_dist = msg.z
+        # Fast attack (immediate reaction when obstacle approaches), slow release (filter clearing)
+        for attr, val in (('front_dist', msg.x), ('left_dist', msg.y), ('right_dist', msg.z)):
+            curr = getattr(self, attr)
+            if val < curr:
+                # Danger closer: update instantly (85% new reading)
+                setattr(self, attr, 0.85 * val + 0.15 * curr)
+            else:
+                # Path clearing: smooth with 35% weight
+                setattr(self, attr, 0.35 * val + 0.65 * curr)
 
     def _us_center_cb(self, msg: Float32):
         if msg.data > 0.0:
             m = float(msg.data) / 100.0 if float(msg.data) > 5.0 else float(msg.data)
-            self.front_dist = m
+            if m < self.front_dist:
+                self.front_dist = 0.85 * m + 0.15 * self.front_dist
+            else:
+                self.front_dist = 0.35 * m + 0.65 * self.front_dist
 
     def _us_left_cb(self, msg: Float32):
         if msg.data > 0.0:
             m = float(msg.data) / 100.0 if float(msg.data) > 5.0 else float(msg.data)
-            self.left_dist = m
+            if m < self.left_dist:
+                self.left_dist = 0.85 * m + 0.15 * self.left_dist
+            else:
+                self.left_dist = 0.35 * m + 0.65 * self.left_dist
 
     def _us_right_cb(self, msg: Float32):
         if msg.data > 0.0:
             m = float(msg.data) / 100.0 if float(msg.data) > 5.0 else float(msg.data)
-            self.right_dist = m
+            if m < self.right_dist:
+                self.right_dist = 0.85 * m + 0.15 * self.right_dist
+            else:
+                self.right_dist = 0.35 * m + 0.65 * self.right_dist
 
     @staticmethod
     def normalize_angle(angle: float) -> float:
@@ -212,6 +225,9 @@ class NavigatorNode(Node):
     # -----------------------------
     def control_loop(self):
         if not self.has_target or not self.has_odom:
+            # In STANDBY: actively hold motors at zero
+            cmd = Twist()
+            self.vel_pub.publish(cmd)
             return
 
         cmd = Twist()
@@ -229,217 +245,136 @@ class NavigatorNode(Node):
         cell = (round(self.robot_x * 4.0) / 4.0, round(self.robot_y * 4.0) / 4.0)
         self.visited_grid[cell] = self.visited_grid.get(cell, 0) + 1
 
-        # Track pacing trap (detect oscillating back-and-forth in a small region)
-        now_sec = self.get_clock().now().nanoseconds * 1e-9
-        self.pos_history.append((now_sec, self.robot_x, self.robot_y))
-        self.pos_history = [(t, x, y) for (t, x, y) in self.pos_history if now_sec - t <= 2.5]
-
-        # Decrement forced bypass timer if active
-        if self.forced_bypass_timer > 0.0:
-            self.forced_bypass_timer -= self.dt
-
-        if len(self.pos_history) >= 15 and dist_to_goal > 0.8:
-            old_t, old_x, old_y = self.pos_history[0]
-            net_disp = math.hypot(self.robot_x - old_x, self.robot_y - old_y)
-            # If net displacement is tiny (< 0.35m over 2.5s) while robot is active:
-            if net_disp < 0.35 and self.forced_bypass_timer <= 0.0:
-                visits_above = sum(cnt for (cx, cy), cnt in self.visited_grid.items() if cy > self.robot_y + 0.1 and abs(cx - self.robot_x) < 0.35)
-                visits_below = sum(cnt for (cx, cy), cnt in self.visited_grid.items() if cy < self.robot_y - 0.1 and abs(cx - self.robot_x) < 0.35)
-                # Invert direction to escape pacing trap toward UNEXPLORED space!
-                self.forced_bypass_dir = -1.0 if visits_above >= visits_below else 1.0
-                self.forced_bypass_timer = 4.0  # Lock escape bypass for 4.0 seconds
-                self.pos_history.clear()
-                self.get_logger().warn(
-                    f"Pacing trap detected! Visits Above={visits_above}, Below={visits_below}. "
-                    f"Breaking out: Forcing bypass {'DOWN (-Y)' if self.forced_bypass_dir < 0 else 'UP (+Y)'} for 4.0s!"
-                )
+        # Decrement turn cooldown
+        if self.avoid_cooldown > 0.0:
+            self.avoid_cooldown -= self.dt
 
         # -----------------------------
         # 1. Goal Arrival Check
         # -----------------------------
         if dist_to_goal <= goal_tol:
             if self.mode == "EXPLORATION":
-                # In exploration mode, keep moving forward into new space
-                self.target_x = self.robot_x + 4.0 * math.cos(self.robot_theta)
-                self.target_y = self.robot_y + 4.0 * math.sin(self.robot_theta)
+                # In exploration mode, extend target 2.0m forward in current heading
+                self.target_x = self.robot_x + 2.0 * math.cos(self.robot_theta)
+                self.target_y = self.robot_y + 2.0 * math.sin(self.robot_theta)
             else:
                 cmd.linear.x = 0.0
                 cmd.angular.z = 0.0
                 self.vel_pub.publish(cmd)
+                self.has_target = False
+                self.mode = "STANDBY"
                 self.get_logger().info(
-                    f"Target reached! (Dist: {dist_to_goal:.2f}m <= {goal_tol:.2f}m)",
+                    f"Target reached! (Dist: {dist_to_goal:.2f}m <= {goal_tol:.2f}m). Standing by.",
                     throttle_duration_sec=2.0
                 )
                 self.stalled_time = 0.0
                 return
 
         # -----------------------------
-        # 2. Local Minima Escape Maneuver
+        # 2. Strict Wall Avoidance Controller
+        # Pure in-place rotation strictly capped to half of previous turn (~0.11s)
         # -----------------------------
-        if self.is_escaping:
-            self.escape_timer -= self.dt
-            if self.escape_timer <= 0.0:
-                self.is_escaping = False
-                self.stalled_time = 0.0
-                self.get_logger().info("Escape turn complete. Re-enabling Artificial Potential Field.")
-            else:
-                # Force 90-degree escape rotation away from dead-end
+        if self.is_avoiding_wall:
+            turn_rate = max_ang  # 0.028 rad/s
+            self.avoid_turn_time += self.dt
+
+            # Turn duration halved to 0.11s for exactly half the turn angle (~10 deg nudge)
+            if self.avoid_turn_time >= 0.11 or self.front_dist >= 0.55:
+                self.is_avoiding_wall = False
+                self.avoid_turn_time = 0.0
+                self.avoid_cooldown = 2.0  # 2.0s cooldown so it drives smoothly forward
+                if self.using_internal_odom:
+                    self.robot_theta = self.normalize_angle(self.robot_theta + self.avoid_turn_dir * 0.175)
                 cmd.linear.x = 0.0
-                cmd.angular.z = self.escape_angular_dir * max_ang * 0.8
+                cmd.angular.z = 0.0
+                self.vel_pub.publish(cmd)
+                self.get_logger().info(
+                    f"Completed exact half-turn in place! Front={self.front_dist:.2f}m. Resuming straight forward crawl."
+                )
+                if self.mode == "EXPLORATION":
+                    # Reorient forward exploration target 2.0m along new heading
+                    self.target_x = self.robot_x + 2.0 * math.cos(self.robot_theta)
+                    self.target_y = self.robot_y + 2.0 * math.sin(self.robot_theta)
+                return
+            else:
+                cmd.linear.x = 0.0
+                cmd.angular.z = self.avoid_turn_dir * turn_rate
                 self.vel_pub.publish(cmd)
                 return
+
+        # Trigger controlled turn when front clearance reaches 50 cm (doubled danger distance)
+        if self.front_dist <= 0.50 and self.avoid_cooldown <= 0.0:
+            self.is_avoiding_wall = True
+            self.avoid_turn_time = 0.0
+            # Choose the side with more room (Left if left_dist >= right_dist, else Right)
+            self.avoid_turn_dir = 1.0 if self.left_dist >= self.right_dist else -1.0
+            self.get_logger().warn(
+                f"Obstacle ahead ({self.front_dist:.2f}m <= 0.50m danger buffer)! Executing smooth in-place nudge {'LEFT' if self.avoid_turn_dir > 0 else 'RIGHT'}..."
+            )
+            cmd.linear.x = 0.0
+            cmd.angular.z = self.avoid_turn_dir * max_ang
+            self.vel_pub.publish(cmd)
+            return
 
         # -----------------------------
         # 3. Calculate Attraction Vector (The Pull)
         # Formula: F_att = K_att * (Target_xy - Robot_xy)
         # -----------------------------
         k_att = self.get_parameter('k_att').value
-        # Cap attraction force magnitude so a distant target does not overpower obstacles
-        att_mag = min(k_att * dist_to_goal, 1.20)
+        att_mag = min(k_att * dist_to_goal, 0.80)
         f_att_world_x = att_mag * (dx_world / max(dist_to_goal, 0.001))
         f_att_world_y = att_mag * (dy_world / max(dist_to_goal, 0.001))
 
         # Transform Attraction Vector into the Robot's Local Frame
-        # where +X is forward and +Y is left
         cos_t = math.cos(self.robot_theta)
         sin_t = math.sin(self.robot_theta)
         f_att_robot_x = f_att_world_x * cos_t + f_att_world_y * sin_t
         f_att_robot_y = -f_att_world_x * sin_t + f_att_world_y * cos_t
 
         # -----------------------------
-        # 4. Calculate Repulsion Vectors (The Push)
+        # 4. Calculate Side Repulsions (Doubled to 50cm Buffer)
         # -----------------------------
         k_rep = self.get_parameter('k_rep').value
-        danger_zone = self.get_parameter('danger_zone').value
-        max_rep = self.get_parameter('max_repulsion_force').value
 
-        def calc_repulsion(d: float) -> float:
-            if d >= danger_zone:
-                return 0.0
-            if d <= 0.04:
-                return max_rep
-            eff_d = max(d, 0.04)
-            # Steep canal embankment: rises sharply near the banks
-            ratio = (danger_zone - eff_d) / eff_d
-            force = k_rep * (ratio ** 1.8)
-            return min(force, max_rep)
+        f_rep_left = 0.0
+        if self.left_dist < 0.50:
+            f_rep_left = k_rep * max(0.0, (0.50 - self.left_dist) / 0.30)
 
-        f_rep_front = calc_repulsion(self.front_dist)
-        f_rep_left = calc_repulsion(self.left_dist)
-        f_rep_right = calc_repulsion(self.right_dist)
-
-        # Canal Streamline Bypass: when approaching a head-on bank, steer towards open / target space
-        f_bypass_robot_x = 0.0
-        f_bypass_robot_y = 0.0
-        if f_rep_front > 0.05:
-            # 1. Active forced bypass from pacing trap breakout
-            if self.forced_bypass_timer > 0.0:
-                target_world_y = self.forced_bypass_dir
-            # 2. Hard arena boundaries: never steer into ceiling or floor
-            elif self.robot_y >= 2.45:
-                target_world_y = -1.0  # Near top ceiling (Y=3.0); route DOWN
-            elif self.robot_y <= 0.55:
-                target_world_y = 1.0   # Near bottom floor (Y=0.0); route UP
-            else:
-                # 3. Local Corridor Exploration (scoped strictly to current corridor, dx < 0.35m)
-                visits_above = sum(cnt for (cx, cy), cnt in self.visited_grid.items() if cy > self.robot_y + 0.1 and abs(cx - self.robot_x) < 0.35)
-                visits_below = sum(cnt for (cx, cy), cnt in self.visited_grid.items() if cy < self.robot_y - 0.1 and abs(cx - self.robot_x) < 0.35)
-
-                if visits_above > visits_below + 6:
-                    target_world_y = -1.0  # Upper part of this corridor explored dead-end; go DOWN
-                elif visits_below > visits_above + 6:
-                    target_world_y = 1.0   # Lower part of this corridor explored dead-end; go UP
-                else:
-                    # 4. Natural Potential: follow target attraction in Y (UP if target above, DOWN if target below)
-                    target_world_y = 1.0 if dy_world >= 0.0 else -1.0
-
-            # Smooth Streamline Flow along the wall:
-            # Desired world flow along the canal is (0.0, target_world_y * bypass_magnitude).
-            # Transform this streamline into the robot frame:
-            #   f_bypass_robot_x = F_world_y * sin(theta)  (forward flow once aligned!)
-            #   f_bypass_robot_y = F_world_y * cos(theta)  (steering torque that drops to ZERO when aligned!)
-            bypass_mag = max(f_rep_front * 1.8, 1.4)
-            f_bypass_robot_x = (target_world_y * bypass_mag) * sin_t
-            f_bypass_robot_y = (target_world_y * bypass_mag) * cos_t
-
-        # Exploration Potential Gradient (Repel from heavily visited regions in local corridor)
-        visits_above = sum(cnt for (cx, cy), cnt in self.visited_grid.items() if cy > self.robot_y + 0.1 and abs(cx - self.robot_x) < 0.35)
-        visits_below = sum(cnt for (cx, cy), cnt in self.visited_grid.items() if cy < self.robot_y - 0.1 and abs(cx - self.robot_x) < 0.35)
-        visit_diff = visits_above - visits_below
-        f_explore_world_y = 0.0
-        # Only apply exploration pressure when navigating maze, ramp down near target (< 0.6m)
-        if abs(visit_diff) >= 4 and dist_to_goal > 0.60:
-            f_explore_world_y = -0.40 * math.tanh(visit_diff / 8.0)
-
-        f_explore_robot_y = f_explore_world_y * cos_t
+        f_rep_right = 0.0
+        if self.right_dist < 0.50:
+            f_rep_right = k_rep * max(0.0, (0.50 - self.right_dist) / 0.30)
 
         # -----------------------------
         # 5. Total Resultant Vector
         # -----------------------------
-        f_total_x = f_att_robot_x - f_rep_front + f_bypass_robot_x
-        f_total_y = f_att_robot_y - f_rep_left + f_rep_right + f_bypass_robot_y + f_explore_robot_y
-
-        # Forward canal flow rule: maintain downstream momentum when front path is clear
-        # (front > 0.28m and not near target > 0.50m).
-        # Side walls should NOT suppress forward flow — that's what steering is for.
-        if self.front_dist > 0.28 and dist_to_goal > 0.50:
-            f_total_x = max(f_total_x, 0.15)
+        f_total_x = max(0.08, f_att_robot_x)
+        f_total_y = f_att_robot_y - f_rep_left + f_rep_right
 
         resultant_magnitude = math.hypot(f_total_x, f_total_y)
         heading_error = math.atan2(f_total_y, f_total_x)  # Heading error in robot frame
+        heading_error = max(-math.pi / 3.0, min(math.pi / 3.0, heading_error))
 
         # -----------------------------
-        # 6. Convert to Motor Commands (geometry_msgs/Twist)
+        # 6. Decoupled Motor Commands
+        # In EXPLORATION: drive strictly straight forward (cmd.angular.z = 0.0).
+        # Rotation ONLY happens when an obstacle is detected ahead!
         # -----------------------------
-        kp_ang = self.get_parameter('kp_angular').value
-        alignment = max(0.0, math.cos(heading_error))
-
-        # Absolute Impenetrable Wall Collision Prevention:
-        # Only brake forward motion in these specific dangerous cases:
-        # 1. Obstacle directly in front (< 0.24m)
-        # 2. Actively steering LEFT into a close left wall (heading_error > +0.35 = turning left)
-        # 3. Actively steering RIGHT into a close right wall (heading_error < -0.35 = turning right)
-        # 4. Front obstacle critically close (< 0.12m)
-        # 5. Heading error is extreme (> 1.40 rad = nearly backwards)
-        # NOTE: Side walls should NEVER block forward motion when heading straight (heading_error ≈ 0).
-        #       The robot MUST be able to pass through narrow slits with close side walls.
-        turning_into_left = (self.left_dist <= 0.16 and heading_error > 0.35)
-        turning_into_right = (self.right_dist <= 0.16 and heading_error < -0.35)
-        front_critical = (self.front_dist <= 0.12)
-
-        if self.front_dist <= 0.24 or turning_into_left or turning_into_right or front_critical or abs(heading_error) > 1.40:
-            cmd.linear.x = 0.0
-            cmd.angular.z = max(min(kp_ang * heading_error, max_ang), -max_ang)
+        if self.mode == "EXPLORATION":
+            # Pure straight forward crawl: absolutely zero rotation when path ahead is clear
+            front_slowdown = min(1.0, max(0.0, (self.front_dist - 0.45) / 0.35))
+            cmd.linear.x = max_lin * front_slowdown
+            cmd.angular.z = 0.0
         else:
-            # Smooth downhill slide towards target
-            front_penalty = min(1.0, max(0.2, (self.front_dist - 0.22) / 0.30))
-            # Side clearance speed scaling: slow down in narrow corridors but never stop
-            side_clearance = min(self.left_dist, self.right_dist)
-            side_penalty = min(1.0, max(0.35, (side_clearance - 0.12) / 0.30))
-            # Smooth arrival deceleration: slows robot down when within 0.60m so it docks cleanly without overshooting
-            goal_decel = min(1.0, max(0.25, dist_to_goal / 0.60))
-            cmd.linear.x = max_lin * (alignment ** 1.2) * front_penalty * side_penalty * goal_decel
-            cmd.angular.z = max(min(kp_ang * heading_error, max_ang), -max_ang)
-
-        # -----------------------------
-        # 7. Check for Local Minima Trap (The Boredom Timer)
-        # -----------------------------
-        boredom_speed_thresh = self.get_parameter('boredom_threshold_speed').value
-        boredom_trigger_time = self.get_parameter('boredom_trigger_time').value
-
-        is_stalled = (cmd.linear.x < boredom_speed_thresh) or (self.front_dist < 0.22 and cmd.linear.x < 0.05)
-        if dist_to_goal > 0.8 and is_stalled:
-            self.stalled_time += self.dt
-            if self.stalled_time >= boredom_trigger_time:
-                self.get_logger().warn(
-                    f"Local minimum detected! Stalled for {self.stalled_time:.1f}s. Initiating Boredom Escape Turn!"
-                )
-                self.is_escaping = True
-                self.escape_timer = self.get_parameter('escape_duration').value
-                self.escape_angular_dir = 1.0 if self.left_dist >= self.right_dist else -1.0
-                return
-        else:
-            self.stalled_time = 0.0
+            # Target Pursuit: steer towards specific coordinate target with generous 20-deg deadband
+            heading_threshold = 0.35  # ~20 degrees
+            if abs(heading_error) > heading_threshold:
+                cmd.linear.x = 0.0
+                turn_sign = 1.0 if heading_error > 0 else -1.0
+                cmd.angular.z = turn_sign * max_ang
+            else:
+                front_slowdown = min(1.0, max(0.0, (self.front_dist - 0.45) / 0.35))
+                cmd.linear.x = max_lin * front_slowdown
+                cmd.angular.z = 0.0
 
         # Internal dead-reckoning integration if external odometry is not available
         if self.using_internal_odom:
@@ -452,6 +387,28 @@ class NavigatorNode(Node):
             throttle_duration_sec=1.0
         )
         self.vel_pub.publish(cmd)
+
+        # -----------------------------
+        # 7. Check for Local Minima Trap (The Boredom Timer)
+        # -----------------------------
+        boredom_speed_thresh = self.get_parameter('boredom_threshold_speed').value
+        boredom_trigger_time = self.get_parameter('boredom_trigger_time').value
+
+        is_stalled = (cmd.linear.x < boredom_speed_thresh) or (self.front_dist < 0.22 and cmd.linear.x < 0.05)
+        if dist_to_goal > 0.8 and is_stalled:
+            self.stalled_time += self.dt
+            if self.stalled_time >= boredom_trigger_time:
+                self.get_logger().warn(
+                    f"Local minimum detected! Stalled for {self.stalled_time:.1f}s. Initiating strict 90-deg turn!"
+                )
+                self.is_avoiding_wall = True
+                self.avoid_turn_time = 0.0
+                self.avoid_turn_dir = 1.0 if self.left_dist >= self.right_dist else -1.0
+                self.stalled_time = 0.0
+                return
+        else:
+            self.stalled_time = 0.0
+
 
 def main(args=None):
     rclpy.init(args=args)

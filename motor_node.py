@@ -27,8 +27,9 @@ MOTOR_PINS = {
     "C": (24, 25),
 }
 
-MAX_POWER = 40
-MIN_POWER_CUTOFF = 12  # Minimum power to overcome DC motor static friction
+MAX_POWER = 100
+MAX_DUTY_LIMIT = 0.25   # Halved speed ceiling: 25% PWM duty cycle (soft, ultra-calm crawl)
+MIN_DUTY_LIMIT = 0.18   # Lower limit: 18% PWM duty cycle (gentle breakaway torque)
 
 # Activate Raspberry Pi internal pull-down resistors so pins NEVER float to HIGH
 import subprocess
@@ -69,12 +70,15 @@ def set_motor(name, value):
         return
     value = max(-MAX_POWER, min(MAX_POWER, int(value)))
 
-    # Static friction deadband compensation: if non-zero, boost to minimum moving power
-    if 0 < abs(value) < MIN_POWER_CUTOFF:
-        value = MIN_POWER_CUTOFF if value > 0 else -MIN_POWER_CUTOFF
+    if abs(value) < 1:
+        duty = 0.0
+    else:
+        # Scale value [1..MAX_POWER] smoothly to [MIN_DUTY_LIMIT..MAX_DUTY_LIMIT]
+        fraction = min(1.0, abs(value) / float(MAX_POWER))
+        duty = MIN_DUTY_LIMIT + fraction * (MAX_DUTY_LIMIT - MIN_DUTY_LIMIT)
+        duty = min(MAX_DUTY_LIMIT, max(MIN_DUTY_LIMIT, duty))
 
     forward, reverse = motors[name]
-    duty = abs(value) / MAX_POWER
 
     try:
         if value > 0:
@@ -117,27 +121,26 @@ class OmniMotorNode(Node):
         vy = msg.linear.y
         w = -msg.angular.z  # Positive angular.z turns left (CCW)
 
-        # Max linear speed from APF navigator is ~0.25 m/s. Normalize to [0.0, 1.0]
+        # Normalize linear speed to gentle 0.10 m/s scale
         lin_speed = math.hypot(vx, vy)
-        norm_linear = min(1.0, lin_speed / 0.25)
+        norm_linear = min(1.0, lin_speed / 0.10)
         linear_power = norm_linear * MAX_POWER
 
-        # Normalize angular speed (~1.4 rad/s max) to [0.0, 1.0]
-        norm_angular = max(-1.0, min(1.0, w / 1.40))
+        # Normalize angular speed to gentle 0.35 rad/s scale
+        norm_angular = max(-1.0, min(1.0, w / 0.35))
         angular_power = norm_angular * MAX_POWER
 
         # If both linear and angular commands are practically zero, stop
-        if lin_speed < 0.02 and abs(w) < 0.05:
+        if lin_speed < 0.005 and abs(w) < 0.005:
             stop_motors()
             return
 
         # Calculate translation heading angle
-        alpha = math.atan2(vy, vx) if lin_speed >= 0.02 else 0.0
+        alpha = math.atan2(vy, vx) if lin_speed >= 0.01 else 0.0
         ax = linear_power * math.cos(alpha)
         ay = linear_power * math.sin(alpha)
 
         # 3-wheel omni-directional kinematics (120-degree motor separation)
-        # w adds equally to all 3 wheels for pure rotation
         w_term = 0.333 * angular_power
         f1 = 0.578 * ax - 0.333 * ay + w_term
         f2 = 0.567 * ay + w_term
@@ -145,7 +148,7 @@ class OmniMotorNode(Node):
 
         # Scale proportionally to fit within target power without clipping
         target_power = max(linear_power, abs(angular_power))
-        target_power = max(MIN_POWER_CUTOFF, min(MAX_POWER, target_power))
+        target_power = max(10.0, min(float(MAX_POWER), target_power))
 
         max_f = max(abs(f1), abs(f2), abs(f3))
         if max_f > 0:

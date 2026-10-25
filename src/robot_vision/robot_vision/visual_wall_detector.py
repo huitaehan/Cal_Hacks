@@ -83,14 +83,14 @@ class VisualWallDetector(Node):
         self.declare_parameter('obstacle_topic', '/obstacle_status')
         self.declare_parameter('debug_image_topic', '/vision/wall_debug')
         self.declare_parameter('publish_debug_image', True)
-        self.declare_parameter('canny_low', 40)
-        self.declare_parameter('canny_high', 120)
-        self.declare_parameter('roi_floor_ratio', 0.50)  # Focus on bottom 50% for ground obstacles
-        self.declare_parameter('edge_threshold_front', 0.10)
-        self.declare_parameter('edge_threshold_side', 0.08)
+        self.declare_parameter('canny_low', 60)
+        self.declare_parameter('canny_high', 160)
+        self.declare_parameter('roi_floor_ratio', 0.45)  # Focus on bottom 45% for ground obstacles
+        self.declare_parameter('edge_threshold_front', 0.14)
+        self.declare_parameter('edge_threshold_side', 0.12)
         self.declare_parameter('max_detection_range', 2.50)  # meters
-        self.declare_parameter('min_detection_range', 0.15)  # meters
-        self.declare_parameter('enable_victim_detection', True)
+        self.declare_parameter('min_detection_range', 0.20)  # meters
+        self.declare_parameter('enable_victim_detection', False)
         self.declare_parameter('yolo_model', 'models/yolov8n.pt')
         self.declare_parameter('focal_length_px', 550.0)
         self.declare_parameter('person_real_height', 1.70)
@@ -191,8 +191,16 @@ class VisualWallDetector(Node):
         )
 
     def _publish_fused_clearances(self):
+        # Sensor fusion: If ultrasonic sees open path (>=0.40m), do not let camera floor texture false positive override it
         center_sensor = self.latest_us_center if self.latest_us_center is not None else (self.latest_ultrasonic if self.has_ultrasonic else None)
-        fused_center = float(min(self.cam_dist_front, center_sensor)) if center_sensor is not None else float(self.cam_dist_front)
+        if center_sensor is not None:
+            if center_sensor >= 0.40 and self.cam_dist_front < 0.30:
+                fused_center = float(center_sensor)
+            else:
+                fused_center = float(min(self.cam_dist_front, center_sensor))
+        else:
+            fused_center = float(self.cam_dist_front)
+
         fused_left = float(min(self.cam_dist_left, self.latest_us_left)) if self.latest_us_left is not None else float(self.cam_dist_left)
         fused_right = float(min(self.cam_dist_right, self.latest_us_right)) if self.latest_us_right is not None else float(self.cam_dist_right)
 
@@ -266,11 +274,13 @@ class VisualWallDetector(Node):
 
         # ----------------------------------------------------
         # 1. Floor Region of Interest (ROI) Extraction
+        # Exclude bottom 18% of image to avoid chassis bumper / floor texture
         # ----------------------------------------------------
         roi_ratio = float(self.get_parameter('roi_floor_ratio').value)
         roi_start_y = int(h * (1.0 - roi_ratio))
-        roi = frame[roi_start_y:h, 0:w]
-        roi_h = h - roi_start_y
+        roi_end_y = int(h * 0.82)
+        roi = frame[roi_start_y:roi_end_y, 0:w]
+        roi_h = roi_end_y - roi_start_y
 
         # ----------------------------------------------------
         # 2. Preprocessing & Edge Detection
@@ -390,10 +400,9 @@ class VisualWallDetector(Node):
             # Below threshold: sector is clear of significant obstacles
             return max_range
 
-        # Bottom-up row scan: row 0 is top of ROI, row (roi_h - 1) is closest to robot bumper
-        # Find the row closest to the bottom with significant edge presence
+        # Require a solid horizontal edge across at least 15% of the sector to count as a wall contact line
         row_counts = np.count_nonzero(sector_edges, axis=1)
-        row_threshold = max(2, int(sector_edges.shape[1] * 0.08))
+        row_threshold = max(6, int(sector_edges.shape[1] * 0.15))
 
         closest_edge_y = -1
         for y in range(roi_h - 1, -1, -1):
@@ -402,14 +411,10 @@ class VisualWallDetector(Node):
                 break
 
         if closest_edge_y != -1:
-            # Proximity metric: 0.0 at top of ROI (far), 1.0 at bottom of ROI (touching bumper)
             proximity = float(closest_edge_y) / float(max(1, roi_h))
-            # Inverse ground plane distance mapping:
-            # Higher proximity (edge near bottom) -> very close distance
             estimated_dist = max_range - proximity * (max_range - min_range)
         else:
-            # Fallback to density scaling
-            estimated_dist = 0.25 / max(density, 0.05)
+            estimated_dist = max_range
 
         return float(np.clip(estimated_dist, min_range, max_range))
 
@@ -424,19 +429,23 @@ class VisualWallDetector(Node):
         cv2.rectangle(overlay, (0, 0), (w, roi_start_y), (20, 20, 20), -1)
         cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
 
-        # Draw ROI divider line
+        # Determine ROI vertical extent from edges_roi
+        roi_end_y = roi_start_y + edges_roi.shape[0]
+
+        # Draw ROI top & bottom divider lines
         cv2.line(frame, (0, roi_start_y), (w, roi_start_y), (0, 255, 255), 2)
+        cv2.line(frame, (0, roi_end_y), (w, roi_end_y), (0, 255, 255), 1)
 
         # Draw sector vertical dividing lines
-        cv2.line(frame, (x_left, roi_start_y), (x_left, h), (255, 255, 0), 2)
-        cv2.line(frame, (x_right, roi_start_y), (x_right, h), (255, 255, 0), 2)
+        cv2.line(frame, (x_left, roi_start_y), (x_left, roi_end_y), (255, 255, 0), 2)
+        cv2.line(frame, (x_right, roi_start_y), (x_right, roi_end_y), (255, 255, 0), 2)
 
-        # Highlight detected edges in cyan inside the ROI
-        cyan_mask = np.zeros_like(frame[roi_start_y:h, 0:w])
+        # Highlight detected edges in cyan inside the cropped ROI
+        cyan_mask = np.zeros_like(frame[roi_start_y:roi_end_y, 0:w])
         cyan_mask[edges_roi > 0] = [255, 255, 0]
-        roi_blend = frame[roi_start_y:h, 0:w]
+        roi_blend = frame[roi_start_y:roi_end_y, 0:w]
         cv2.addWeighted(roi_blend, 0.7, cyan_mask, 0.3, 0, roi_blend)
-        frame[roi_start_y:h, 0:w] = roi_blend
+        frame[roi_start_y:roi_end_y, 0:w] = roi_blend
 
         # Draw YOLO / HOG Victim Bounding Boxes
         if detections:
@@ -449,12 +458,12 @@ class VisualWallDetector(Node):
                 cv2.putText(frame, label, (det.x + 3, max(15, det.y - 4)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 1)
 
-        # Color-coded clearance labels (Red = danger < 0.5m, Yellow = warning < 0.9m, Green = clear)
+        # Color-coded clearance labels (Red = danger <= 0.40m [40cm], Amber = caution < 0.70m, Green = clear)
         def get_color(d):
-            if d < 0.50:
-                return (0, 0, 255)      # Red
-            elif d < 0.90:
-                return (0, 200, 255)    # Amber
+            if d <= 0.40:
+                return (0, 0, 255)      # Red (<= 40cm danger zone)
+            elif d < 0.70:
+                return (0, 200, 255)    # Amber (< 70cm caution)
             return (0, 255, 0)          # Green
 
         font = cv2.FONT_HERSHEY_SIMPLEX

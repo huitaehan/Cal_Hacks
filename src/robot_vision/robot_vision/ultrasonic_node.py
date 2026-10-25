@@ -49,22 +49,22 @@ class MultiUltrasonicPublisher(Node):
         for attempt in range(3):
             if self.sensor_center is None:
                 try:
-                    self.sensor_center = DistanceSensor(echo=13, trigger=12)
-                    self.get_logger().info('Center Ultrasonic initialized (Trig=12, Echo=13)')
+                    self.sensor_center = DistanceSensor(echo=13, trigger=12, max_distance=2.5)
+                    self.get_logger().info('Center Ultrasonic initialized (Trig=12, Echo=13, max=2.5m)')
                 except Exception as e:
                     if attempt == 2:
                         self.get_logger().warn(f'Center Ultrasonic init: {e}')
             if self.sensor_left is None:
                 try:
-                    self.sensor_left = DistanceSensor(echo=21, trigger=20)
-                    self.get_logger().info('Left Ultrasonic initialized (Trig=20, Echo=21)')
+                    self.sensor_left = DistanceSensor(echo=21, trigger=20, max_distance=2.5)
+                    self.get_logger().info('Left Ultrasonic initialized (Trig=20, Echo=21, max=2.5m)')
                 except Exception as e:
                     if attempt == 2:
                         self.get_logger().warn(f'Left Ultrasonic init: {e}')
             if self.sensor_right is None:
                 try:
-                    self.sensor_right = DistanceSensor(echo=6, trigger=5)
-                    self.get_logger().info('Right Ultrasonic initialized (Trig=5, Echo=6)')
+                    self.sensor_right = DistanceSensor(echo=6, trigger=5, max_distance=2.5)
+                    self.get_logger().info('Right Ultrasonic initialized (Trig=5, Echo=6, max=2.5m)')
                 except Exception as e:
                     if attempt == 2:
                         self.get_logger().warn(f'Right Ultrasonic init: {e}')
