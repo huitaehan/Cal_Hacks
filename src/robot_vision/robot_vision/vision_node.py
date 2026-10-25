@@ -8,8 +8,11 @@ pinhole 3D projection, and ultrasonic sensor fusion.
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+from sensor_msgs.msg import Image
 from geometry_msgs.msg import Vector3, Point
 from nav_msgs.msg import Odometry
+from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import numpy as np
 import math
@@ -26,7 +29,7 @@ class VisionNode(Node):
         # Parameters
         # ----------------------------------------------------
         self.declare_parameter('robot_id', '')               # e.g., 'robot1', 'robot2', or ''
-        self.declare_parameter('camera_source', '0')         # '0', '/dev/video0', or 'http://192.168.1.101:5000/video'
+        self.declare_parameter('camera_source', '/image_raw')# '/image_raw', '0', or 'http://...'
         self.declare_parameter('image_width', 640)
         self.declare_parameter('image_height', 480)
         self.declare_parameter('processing_fps', 20.0)
@@ -90,6 +93,30 @@ class VisionNode(Node):
         )
 
     def _init_camera(self, cam_src: str):
+        self.use_ros_image = False
+        self.latest_frame = None
+        self.bridge = CvBridge()
+
+        # If camera source is a ROS 2 topic (e.g. '/image_raw' or 'ros')
+        if cam_src.startswith('/') or cam_src == 'ros':
+            topic_name = '/image_raw' if cam_src == 'ros' else cam_src
+            self.use_ros_image = True
+            qos = QoSProfile(
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+                history=HistoryPolicy.KEEP_LAST,
+                depth=1,
+                durability=DurabilityPolicy.VOLATILE
+            )
+            self.image_sub = self.create_subscription(
+                Image,
+                topic_name,
+                self._ros_image_cb,
+                qos
+            )
+            self.camera_available = True
+            self.get_logger().info(f"Subscribed to ROS 2 image topic: '{topic_name}' via cv_bridge")
+            return
+
         width = self.get_parameter('image_width').value
         height = self.get_parameter('image_height').value
 
@@ -122,6 +149,13 @@ class VisionNode(Node):
             self.camera_available = False
             self.get_logger().error(f"Error initializing camera '{cam_src}': {e}")
 
+    def _ros_image_cb(self, msg: Image):
+        try:
+            self.latest_frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            self.camera_available = True
+        except CvBridgeError as e:
+            self.get_logger().error(f"CvBridge error converting frame: {e}")
+
     def _odom_cb(self, msg: Odometry):
         self.robot_x = msg.pose.pose.position.x
         self.robot_y = msg.pose.pose.position.y
@@ -139,22 +173,32 @@ class VisionNode(Node):
     def process_frame(self):
         obs_msg = Vector3()
 
-        # If camera not connected, rely directly on ultrasonic sensors
-        if not self.camera_available or self.cap is None:
-            obs_msg.x = float(self.sonar_front)
-            obs_msg.y = float(self.sonar_left)
-            obs_msg.z = float(self.sonar_right)
-            self.obstacle_pub.publish(obs_msg)
-            return
+        if self.use_ros_image:
+            frame = self.latest_frame
+            if frame is None:
+                # Awaiting first frame from ROS topic
+                obs_msg.x = float(self.sonar_front)
+                obs_msg.y = float(self.sonar_left)
+                obs_msg.z = float(self.sonar_right)
+                self.obstacle_pub.publish(obs_msg)
+                return
+        else:
+            # If camera not connected, rely directly on ultrasonic sensors
+            if not self.camera_available or self.cap is None:
+                obs_msg.x = float(self.sonar_front)
+                obs_msg.y = float(self.sonar_left)
+                obs_msg.z = float(self.sonar_right)
+                self.obstacle_pub.publish(obs_msg)
+                return
 
-        ret, frame = self.cap.read()
-        if not ret or frame is None:
-            self.get_logger().warn("Failed to grab camera frame", throttle_duration_sec=4.0)
-            obs_msg.x = float(self.sonar_front)
-            obs_msg.y = float(self.sonar_left)
-            obs_msg.z = float(self.sonar_right)
-            self.obstacle_pub.publish(obs_msg)
-            return
+            ret, frame = self.cap.read()
+            if not ret or frame is None:
+                self.get_logger().warn("Failed to grab camera frame", throttle_duration_sec=4.0)
+                obs_msg.x = float(self.sonar_front)
+                obs_msg.y = float(self.sonar_left)
+                obs_msg.z = float(self.sonar_right)
+                self.obstacle_pub.publish(obs_msg)
+                return
 
         h, w = frame.shape[:2]
 

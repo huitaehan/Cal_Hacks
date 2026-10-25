@@ -3,9 +3,15 @@ Human Victim & Object Detector module.
 Supports YOLOv8 (ultralytics) with automatic seamless fallback to OpenCV HOG People Detector.
 """
 
+import os
 import cv2
 import numpy as np
 from typing import List, Tuple, Dict, Any, Optional
+
+# Enforce offline mode for ultralytics so it never pings external servers
+os.environ['YOLO_OFFLINE'] = '1'
+os.environ['ULTRALYTICS_AUTOINSTALL'] = '0'
+os.environ['ULTRALYTICS_CHECK_REQUIREMENTS'] = '0'
 
 class Detection:
     def __init__(self, x: int, y: int, w: int, h: int, confidence: float, class_name: str = 'person'):
@@ -25,22 +31,50 @@ class VictimDetector:
         self.hog = None
 
         if prefer_yolo:
+            # Resolve model file from multiple candidate local paths
+            resolved_path = self._resolve_model_path(model_name)
             try:
                 from ultralytics import YOLO
-                self.model = YOLO(model_name)
+                self.model = YOLO(resolved_path)
                 self.backend = 'yolov8'
-                print(f"[VictimDetector] Initialized YOLOv8 ({model_name}) backend successfully.")
+                print(f"[VictimDetector] Initialized YOLOv8 ({resolved_path}) offline successfully.")
             except ImportError:
                 print("[VictimDetector] 'ultralytics' not installed. Falling back to OpenCV HOG People Detector.")
             except Exception as e:
-                print(f"[VictimDetector] Could not load YOLO model ({e}). Falling back to OpenCV HOG.")
+                print(f"[VictimDetector] Could not load YOLO model from '{resolved_path}' ({e}). Falling back to OpenCV HOG.")
 
         if self.backend == 'none':
-            # Initialize OpenCV HOG Default People Detector
+            # Initialize OpenCV HOG Default People Detector (requires zero downloads)
             self.hog = cv2.HOGDescriptor()
             self.hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
             self.backend = 'opencv_hog'
-            print("[VictimDetector] Initialized OpenCV HOG People Detector backend.")
+            print("[VictimDetector] Initialized OpenCV HOG People Detector backend (100% offline).")
+
+    def _resolve_model_path(self, model_name: str) -> str:
+        """Finds the local .pt model file without accessing the internet."""
+        if os.path.isabs(model_name) and os.path.exists(model_name):
+            return model_name
+
+        search_dirs = [
+            os.getcwd(),
+            os.path.join(os.getcwd(), 'models'),
+            os.path.join(os.getcwd(), 'src', 'robot_vision', 'models'),
+            '/workspace',
+            '/workspace/models',
+            '/workspace/src/robot_vision/models',
+            os.path.dirname(os.path.abspath(__file__)),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'models'),
+            os.path.expanduser('~/.cache/ultralytics'),
+        ]
+
+        base_name = os.path.basename(model_name)
+        for directory in search_dirs:
+            candidate = os.path.join(directory, base_name)
+            if os.path.isfile(candidate):
+                return os.path.abspath(candidate)
+
+        return model_name
 
     def detect(self, frame: np.ndarray, conf_thresh: float = 0.35) -> List[Detection]:
         """
