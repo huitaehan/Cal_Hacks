@@ -1,0 +1,935 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FirstIn</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --text:#e6e8ee; --dim:#8b92a3;
+          --s1:#4da3ff; --s2:#ffb84d; --live:#5eead4; --fire:#ff5a47; --victim:#4be08a; --warn:#ffd24d;
+          --claude:#c9b6ff; --ok:#4be08a; --bad:#ff5a47; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,sans-serif; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; letter-spacing:.02em; }
+  header .sub { color:var(--dim); font-size:12px; }
+  #badges { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; }
+  .badge { font-size:12px; padding:3px 10px; border:1px solid var(--line); border-radius:99px; background:#12151b; white-space:nowrap; }
+  .badge i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; background:var(--dim); }
+  .badge.on i { background:var(--ok); } .badge.warn i { background:var(--warn); } .badge.off i { background:var(--bad); }
+  .wrap { padding:12px; display:grid; gap:12px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; min-width:0; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:0 0 8px; font-weight:600; }
+  h2 small { text-transform:none; letter-spacing:0; font-weight:400; margin-left:6px; }
+  .row { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  input[type=text] { flex:1; min-width:200px; background:#0f1218; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:9px; font-size:14px; }
+  button { background:#232838; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:8px 12px; cursor:pointer; font-size:13px; }
+  button:hover { background:#2d3447; }
+  button.primary { background:#2a62d9; border-color:#2a62d9; }
+  #status { color:var(--dim); font-size:12px; margin-top:8px; min-height:16px; }
+
+  /* Voice strip */
+  .voice-grid { display:grid; grid-template-columns: 1fr 1fr auto; gap:16px; align-items:start; }
+  @media (max-width: 900px) { .voice-grid { grid-template-columns: 1fr; } }
+  .v-big { font-size:22px; line-height:1.25; min-height:56px; }
+  .v-big.dim { color:var(--dim); }
+  .v-meta { display:flex; flex-direction:column; gap:8px; align-items:flex-end; min-width:190px; }
+  .chip { font-size:12px; padding:3px 10px; border-radius:99px; border:1px solid var(--line); background:#12151b; color:var(--dim); }
+  .chip.good { color:var(--ok); border-color:#245a3a; }
+  .eq { display:flex; gap:3px; align-items:flex-end; height:26px; }
+  .eq span { width:5px; height:6px; background:#3a4152; border-radius:2px; }
+  .eq.on span { background:var(--s1); animation: bounce .8s ease-in-out infinite; }
+  .eq.on span:nth-child(2){ animation-delay:.12s } .eq.on span:nth-child(3){ animation-delay:.24s }
+  .eq.on span:nth-child(4){ animation-delay:.36s } .eq.on span:nth-child(5){ animation-delay:.18s }
+  @keyframes bounce { 0%,100% { height:6px } 50% { height:24px } }
+
+  /* Layout */
+  .cols { display:grid; grid-template-columns: 340px minmax(0,1fr) 360px; gap:12px; align-items:start; }
+  @media (max-width: 1200px) { .cols { grid-template-columns: 1fr 1fr; } .cols > .center { grid-column: 1 / -1; order:-1; } }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+  .stack { display:grid; gap:12px; min-width:0; }
+  canvas { width:100%; height:auto; background:#12151b; border-radius:8px; display:block; }
+  .legend span { margin-right:12px; color:var(--dim); font-size:12px; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+
+  /* Agent trace */
+  #trace { max-height:420px; overflow:auto; display:grid; gap:8px; }
+  .tr { border:1px solid var(--line); border-left:3px solid #5b6275; border-radius:6px; padding:8px; background:#12151b; }
+  .tr.claude { border-left-color:var(--claude); }
+  .tr-head { font-size:13px; }
+  .tr-meta { margin:4px 0; display:flex; gap:6px; flex-wrap:wrap; }
+  .tr code { display:block; font:12px ui-monospace,Menlo,monospace; color:#d6dbe8; background:#0c0e13; border-radius:4px; padding:3px 6px; margin-top:3px; white-space:pre-wrap; word-break:break-word; }
+  .note { font-size:12px; margin-top:4px; }
+  .note.ok { color:var(--ok); } .note.bad { color:var(--bad); } .note.dim { color:var(--dim); }
+  .empty { color:var(--dim); font-size:13px; }
+
+  /* Evidence */
+  #evidence { display:grid; gap:8px; max-height:340px; overflow:auto; }
+  .ev { border:1px solid var(--line); border-radius:8px; padding:8px; background:#12151b; }
+  .ev.confirmed, .ev.dispatched { border-color:#245a3a; }
+  .ev-head { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:99px; color:#0b0d12; white-space:nowrap; }
+  .pill.unverified { background:var(--warn); } .pill.confirmed { background:#8fe3b0; } .pill.dispatched { background:var(--ok); }
+  .ev-src { font-size:12.5px; margin-top:4px; color:#cfd4e0; }
+  .ev-src.wait { color:var(--dim); font-style:italic; }
+  .ev-foot { font-size:12px; color:var(--dim); margin-top:4px; }
+
+  /* Log */
+  #log { height:220px; overflow:auto; font-size:12.5px; }
+  #log div { padding:3px 0; border-bottom:1px solid var(--line); }
+  .ts { color:var(--dim); font-size:11px; margin-right:6px; font-variant-numeric:tabular-nums; }
+  .tag { display:inline-block; font-size:11px; padding:1px 6px; border-radius:99px; margin-right:6px; color:#0b0d12; }
+  .s1 { background:var(--s1); } .s2 { background:var(--s2); } .cmd { background:var(--claude); } .sys { background:#8b92a3; } .live { background:var(--live); }
+
+  /* Camera */
+  #cam { position:relative; background:#0c0e13; border-radius:8px; min-height:150px; overflow:hidden; }
+  #cam img { width:100%; display:block; }
+  #cam img[hidden], #cam-empty[hidden] { display:none; }
+  #cam-empty { padding:36px 12px; text-align:center; color:var(--dim); font-size:13px; }
+  #cam-note { position:absolute; left:0; right:0; bottom:0; padding:6px 10px; background:rgba(0,0,0,.65); font-size:13px; display:none; }
+
+  /* Failure drill */
+  .drill label { display:flex; gap:8px; align-items:center; cursor:pointer; }
+  .drill p { margin:4px 0 10px; font-size:12px; color:var(--dim); }
+  .drill button { width:100%; text-align:left; }
+
+  /* Metrics */
+  .metrics { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr)); gap:10px; }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .tile b { display:block; font-size:22px; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .tile span { color:var(--dim); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FirstIn</h1>
+  <span class="sub">Voice-commanded scouts. The agent proposes, rules verify, a human gets the call.</span>
+  <div id="badges"></div>
+</header>
+
+<div class="wrap">
+  <!-- Voice strip: the thing Cartesia judges look at first -->
+  <section class="panel">
+    <div class="voice-grid">
+      <div><h2>Heard (commander)</h2><div id="v-heard" class="v-big dim">Say or type a command.</div></div>
+      <div><h2>Said <small id="v-who"></small></h2><div id="v-said" class="v-big dim">Nothing yet.</div></div>
+      <div class="v-meta">
+        <div class="eq" id="eq"><span></span><span></span><span></span><span></span><span></span></div>
+        <div class="chip" id="v-lat">voice latency: no lines yet</div>
+      </div>
+    </div>
+    <div class="row">
+      <input id="cmd" type="text" placeholder='Try: "search the building", "search the east wing", "scout 1 room B", "nearest exit from room B", "stop all"'>
+      <button class="primary" id="send">Send command</button>
+      <button id="mic" title="Browser speech recognition stands in for Cartesia STT in this mock-up">Mic</button>
+      <button id="reset">Reset</button>
+    </div>
+    <div id="status"></div>
+  </section>
+
+  <div class="cols">
+    <div class="stack">
+      <section class="panel">
+        <h2>Agent trace <small>what Claude decided, and what checked it</small></h2>
+        <div id="trace"><div class="empty">Commands and the tool calls they produce appear here.</div></div>
+      </section>
+      <section class="panel drill">
+        <h2>Failure drill</h2>
+        <label><input type="checkbox" id="kill"> Kill the Claude planner</label>
+        <p>Commands fall back to built-in rules. "Stop" never needed the planner anyway.</p>
+        <button id="inject">Inject a single-source detection</button>
+        <p>A lone report must not trigger a call. Watch it get held.</p>
+        <button id="second">Add the 2nd source to the latest held one</button>
+        <p>Two independent sources confirm it. This can place the real call if calls are live.</p>
+      </section>
+    </div>
+
+    <div class="stack center">
+      <section class="panel">
+        <h2>Floor plan <small>simulated stand-in for the arena</small></h2>
+        <canvas id="map" width="800" height="520"></canvas>
+        <div class="legend" style="margin-top:8px">
+          <span><i class="dot" style="background:var(--s1)"></i>Scout 1</span>
+          <span><i class="dot" style="background:var(--s2)"></i>Scout 2</span>
+          <span><i class="dot" style="background:var(--victim)"></i>Victim (dashed = one source)</span>
+          <span><i class="dot" style="background:var(--fire)"></i>Fire</span>
+          <span><i class="dot" style="background:#3a3f4d"></i>Unexplored</span>
+          <span><i class="dot" style="background:#1d3a2a"></i>Cleared</span>
+          <span><i class="dot" style="background:#ff963c"></i>Hazard (not entered)</span>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Camera <small>vision feed from the arena</small></h2>
+        <div id="cam">
+          <img id="cam-img" alt="Live camera feed" hidden>
+          <div id="cam-empty">No camera feed connected. Start the server with CAMERA_URL=&lt;stream url&gt; or open the page with ?cam=&lt;stream url&gt;.</div>
+          <div id="cam-note"></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section class="panel">
+        <h2>Evidence <small>a call needs two independent sources</small></h2>
+        <div id="evidence"><div class="empty">No victims logged yet.</div></div>
+      </section>
+      <section class="panel">
+        <h2>Dispatch <small>phone call to the rescue team</small></h2>
+        <div id="dispatch" style="font-size:13px">No calls yet.</div>
+      </section>
+      <section class="panel">
+        <h2>Audit log <small>the table the voice reads from</small></h2>
+        <div id="log"></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="metrics" id="metrics">
+    <div class="tile"><span>Time to first confirmation</span><b id="m-first">-</b></div>
+    <div class="tile"><span>Rooms searched</span><b id="m-rooms">0 / 4</b></div>
+    <div class="tile"><span>Cleared / unexplored (not clear) / hazard avoided</span><b style="font-size:18px"><span id="s-clear">0%</span> / <span id="s-unk">100%</span> / <span id="s-hcell">0%</span></b></div>
+    <div class="tile"><span>Victims found (confirmed)</span><b id="s-vic">0</b></div>
+    <div class="tile"><span>Awaiting 2nd source</span><b id="m-held">0</b></div>
+    <div class="tile"><span>Calls (placed or dry-run)</span><b id="m-calls">0</b></div>
+    <div class="tile"><span>Spoken answers blocked</span><b id="m-blocked">0</b></div>
+    <div class="tile"><span>Planner latency (avg)</span><b id="m-plan">-</b></div>
+    <div class="tile"><span>Voice latency (avg)</span><b id="m-voice">-</b></div>
+  </section>
+</div>
+
+<script>
+// ---------- World model (replace with SpacetimeDB subscriptions later) ----------
+const W = 800, H = 520, CELL = 20, COLS = W / CELL, ROWS = H / CELL;
+
+const rooms = {
+  A: { x: 40,  y: 40,  w: 220, h: 180, label: 'Room A' },
+  B: { x: 40,  y: 300, w: 220, h: 180, label: 'Room B' },
+  C: { x: 540, y: 40,  w: 220, h: 180, label: 'Room C' },
+  D: { x: 540, y: 300, w: 220, h: 180, label: 'Room D' },
+};
+const corridor = { x: 260, y: 220, w: 280, h: 80 };
+const exitPt = { x: 400, y: 505 };
+const HOME = { scout1: { x: 380, y: 260 }, scout2: { x: 420, y: 280 } };
+
+// Ground truth for the simulation (hidden from the planner until a robot observes it).
+const truth = {
+  victims: [{ id: 'v1', x: 120, y: 380, room: 'B' }, { id: 'v2', x: 650, y: 100, room: 'C' }],
+  fires:   [{ id: 'f1', x: 640, y: 380, r: 40, room: 'D' }],
+  blocked: [{ id: 'b1', x: 300, y: 250, w: 24, h: 50 }],
+};
+
+let state;
+function freshState() {
+  return {
+    grid: Array.from({ length: ROWS }, () => Array(COLS).fill('unknown')),
+    detections: [],       // what the system has actually observed (sim and live)
+    evidence: [],         // per victim: which independent sources reported it
+    queue: [],
+    searched: new Set(),
+    reported: true,
+    robots: [
+      { id: 'scout1', name: 'Scout 1', x: HOME.scout1.x, y: HOME.scout1.y, theta: 0, target: null, path: [], status: 'idle', color: '#4da3ff' },
+      { id: 'scout2', name: 'Scout 2', x: HOME.scout2.x, y: HOME.scout2.y, theta: 0, target: null, path: [], status: 'idle', color: '#ffb84d' },
+    ],
+    events: [],
+    t0: null, firstConfirmMs: null, calls: 0, blockedAnswers: 0,
+    lat: { plan: [], voice: [] },
+  };
+}
+const tagOf = (r) => (r.id === 'scout1' ? 's1' : 's2');
+const tagFor = (src) => (src === 'scout1' ? 's1' : src === 'scout2' ? 's2' : 'live');
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const clock = (t = Date.now()) => new Date(t).toLocaleTimeString([], { hour12: false });
+const detRoom = (d) => d.room || roomAt(d) || 'corridor';
+const isNum = (n) => typeof n === 'number' && Number.isFinite(n);
+const robotLabel = (id) => ({ scout1: 'Scout 1', scout2: 'Scout 2', commander: 'Dispatch' }[id] || id);
+
+function log(tag, who, msg) {
+  state.events.push({ ts: Date.now(), tag, who, msg });
+  const d = document.createElement('div');
+  d.innerHTML = `<span class="ts">${clock()}</span><span class="tag ${tag}">${esc(who)}</span>${esc(msg)}`;
+  const el = document.getElementById('log');
+  el.appendChild(d); el.scrollTop = el.scrollHeight;
+}
+function setStatus(s) { document.getElementById('status').textContent = s; }
+const avg = (a) => (a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : null);
+
+// ---------- Config and badges ----------
+let voiceReady = false, plannerReady = false, plannerModel = '', callMode = 'dry-run', cameraUrl = '';
+let plannerKilled = false, liveConnected = false, liveCount = 0;
+function renderBadges() {
+  const b = (cls, text) => `<span class="badge ${cls}"><i></i>${esc(text)}</span>`;
+  document.getElementById('badges').innerHTML = [
+    b(voiceReady ? 'on' : 'warn', voiceReady ? 'Voice: Cartesia' : 'Voice: silent'),
+    plannerKilled ? b('off', 'Planner: killed (drill)') : plannerReady ? b('on', 'Planner: ' + (plannerModel || 'Claude')) : b('warn', 'Planner: built-in rules'),
+    b(callMode === 'live' ? 'on' : 'warn', callMode === 'live' ? 'Calls: LIVE' : 'Calls: dry-run'),
+    b(liveConnected ? 'on' : 'warn', liveConnected ? `Vision feed: connected (${liveCount} reports)` : 'Vision feed: waiting'),
+  ].join('');
+}
+
+// ---------- Voice strip + Cartesia playback ----------
+const speakQueue = [];
+let speaking = false;
+function setHeard(t) { const e = document.getElementById('v-heard'); e.textContent = t; e.classList.remove('dim'); }
+function setSaid(robot, t) {
+  const e = document.getElementById('v-said'); e.textContent = t; e.classList.remove('dim');
+  document.getElementById('v-who').textContent = robotLabel(robot);
+}
+function setSpeaking(on) { document.getElementById('eq').classList.toggle('on', on); }
+function recordVoice(ms) {
+  state.lat.voice.push(ms);
+  const chip = document.getElementById('v-lat');
+  chip.textContent = `voice: reply started in ${ms} ms (avg ${avg(state.lat.voice)} ms, ${state.lat.voice.length} lines)`;
+  chip.classList.add('good');
+}
+function speak(robot, text) {
+  if (!voiceReady) { setSaid(robot, text); return; }
+  speakQueue.push({ robot, text });
+  if (!speaking) drain();
+}
+async function drain() {
+  speaking = true;
+  while (speakQueue.length) {
+    const { robot, text } = speakQueue.shift();
+    try {
+      const t0 = performance.now();
+      const r = await fetch('/speak', { method: 'POST', body: JSON.stringify({ robot, text }) });
+      if (!r.ok) { setSaid(robot, text); setStatus('TTS error: ' + await r.text()); continue; }
+      const url = URL.createObjectURL(await r.blob());
+      await new Promise((res) => {
+        const a = new Audio(url);
+        a.onended = res; a.onerror = res;
+        a.play().then(() => { recordVoice(Math.round(performance.now() - t0)); setSaid(robot, text); setSpeaking(true); }).catch(() => { setSaid(robot, text); res(); });
+      });
+      setSpeaking(false);
+    } catch (e) { setStatus('TTS failed: ' + e); }
+  }
+  speaking = false;
+}
+function robotSays(robot, text) { log(tagOf(robot), robot.name, text); speak(robot.id, text); }
+function sayDispatch(text) { log('sys', 'Dispatch', text); speak('commander', text); }
+
+// ---------- Agent trace ----------
+let trace = [], curTrace = null;
+function newTrace(text) {
+  curTrace = { ts: Date.now(), text, via: '', why: '', ms: null, calls: [], notes: [] };
+  trace.unshift(curTrace); if (trace.length > 30) trace.pop();
+  renderTrace(); return curTrace;
+}
+function tr(call) { if (curTrace) { curTrace.calls.push(call); renderTrace(); } }
+function trNote(kind, msg) { if (curTrace) { curTrace.notes.push({ kind, msg }); renderTrace(); } }
+function renderTrace() {
+  const el = document.getElementById('trace');
+  if (!trace.length) { el.innerHTML = '<div class="empty">Commands and the tool calls they produce appear here.</div>'; return; }
+  el.innerHTML = trace.map((t) => `
+    <div class="tr ${t.via === 'Claude' ? 'claude' : ''}">
+      <div class="tr-head"><span class="tag cmd">Commander</span>${esc(t.text)}</div>
+      <div class="tr-meta">
+        <span class="chip">${t.via ? 'via ' + esc(t.via) : 'planning...'}${t.ms != null ? ' · ' + t.ms + ' ms' : ''}</span>
+        ${t.why ? `<span class="chip">${esc(t.why)}</span>` : ''}
+      </div>
+      ${t.calls.map((c) => `<code>${esc(c)}</code>`).join('')}
+      ${t.notes.map((n) => `<div class="note ${n.kind}">${n.kind === 'ok' ? '&#10003; ' : n.kind === 'bad' ? '&#10007; ' : ''}${esc(n.msg)}</div>`).join('')}
+    </div>`).join('');
+}
+
+// ---------- Evidence: a victim is only "confirmed" with two independent sources ----------
+function addEvidence(id, room, src, conf, desc) {
+  src = String(src).toLowerCase().trim();
+  let e = state.evidence.find((x) => x.id === id);
+  if (!e) { e = { id, room, sources: [], status: 'unverified', dispatch: '', note: '', ts: Date.now() }; state.evidence.push(e); }
+  const s = e.sources.find((x) => x.src === src);
+  if (s) { s.conf = conf; if (desc) s.desc = desc; }
+  else e.sources.push({ src, conf, desc, ts: Date.now() });
+  renderEvidence();
+  return { e, isNewSource: !s };
+}
+function checkConfirm(e, det) {
+  const n = new Set(e.sources.map((s) => s.src)).size;
+  if (n >= 2 && e.status === 'unverified') {
+    e.status = 'confirmed'; det.verified = true;
+    if (state.firstConfirmMs === null && state.t0) state.firstConfirmMs = Date.now() - state.t0;
+    renderEvidence();
+    dispatchVictim(det, e);
+    return true;
+  }
+  return false;
+}
+function renderEvidence() {
+  const el = document.getElementById('evidence');
+  if (!state.evidence.length) { el.innerHTML = '<div class="empty">No victims logged yet.</div>'; return; }
+  const label = { unverified: 'Held: needs 2nd source', confirmed: 'Confirmed', dispatched: 'Dispatched' };
+  el.innerHTML = [...state.evidence].reverse().map((e) => {
+    const srcs = e.sources.map((s, i) => `<div class="ev-src">Source ${i + 1}: <b>${esc(s.src)}</b> · ${Math.round(s.conf * 100)}%${s.desc ? ' · ' + esc(s.desc) : ''}</div>`).join('');
+    const wait = e.sources.length < 2 ? '<div class="ev-src wait">Source 2: waiting for an independent source</div>' : '';
+    const foot = e.dispatch ? `Call: ${esc(e.dispatch)}${e.note ? ' · ' + esc(e.note) : ''}` : (e.status === 'confirmed' ? 'Preparing call...' : 'No call: a single source is never enough.');
+    const room = rooms[e.room] ? rooms[e.room].label : 'unknown room';
+    return `<div class="ev ${e.status}"><div class="ev-head"><span><b>Victim ${esc(e.id)}</b> · ${esc(room)}</span><span class="pill ${e.status}">${label[e.status]}</span></div>${srcs}${wait}<div class="ev-foot">${foot}</div></div>`;
+  }).join('');
+}
+
+// ---------- Geometry helpers: hazards the robots must route around ----------
+const doorOf = (k) => ({ x: rooms[k].x < 400 ? 260 : 540, y: 260 });
+function roomAt(p) {
+  return Object.keys(rooms).find((k) => {
+    const r = rooms[k];
+    return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+  });
+}
+const hazards = () => state.detections.filter((d) => d.kind === 'fire' || d.kind === 'blocked');
+const padOf = (o) => (o.kind === 'fire' ? 14 : 8);
+function inHazard(p, o, pad) {
+  return o.kind === 'fire'
+    ? Math.hypot(p.x - o.x, p.y - o.y) < o.r + pad
+    : p.x > o.x - pad && p.x < o.x + o.w + pad && p.y > o.y - pad && p.y < o.y + o.h + pad;
+}
+function segHits(a, b, o, pad) {
+  const n = Math.max(2, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 3));
+  for (let i = 1; i < n; i++) {
+    const t = i / n;
+    if (inHazard({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, o, pad)) return true;
+  }
+  return false;
+}
+function detour(a, b, o) {
+  if (o.kind === 'blocked') {
+    const above = o.y - corridor.y, below = corridor.y + corridor.h - (o.y + o.h);
+    const y = above >= below ? corridor.y + above / 2 : o.y + o.h + below / 2;
+    const L = { x: o.x - 16, y }, R = { x: o.x + o.w + 16, y };
+    return a.x < b.x ? [L, R] : [R, L];
+  }
+  const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+  const d = { x: dx / len, y: dy / len }, n = { x: -d.y, y: d.x }, R = o.r + 30;
+  const side = ((a.x - o.x) * n.x + (a.y - o.y) * n.y) >= 0 ? 1 : -1;
+  const mk = (s) => [
+    { x: o.x - d.x * R + n.x * R * s, y: o.y - d.y * R + n.y * R * s },
+    { x: o.x + d.x * R + n.x * R * s, y: o.y + d.y * R + n.y * R * s },
+  ];
+  let ws = mk(side);
+  if (!ws.every((w) => inBuilding(w.x, w.y))) {
+    const alt = mk(-side);
+    if (alt.every((w) => inBuilding(w.x, w.y))) ws = alt;
+  }
+  return ws;
+}
+function expand(a, b, depth = 0) {
+  if (depth > 3) return [b];
+  for (const o of hazards()) {
+    if (segHits(a, b, o, padOf(o))) {
+      const pts = [...detour(a, b, o), b], out = [];
+      let cur = a;
+      for (const q of pts) { out.push(...expand(cur, q, depth + 1)); cur = q; }
+      return out;
+    }
+  }
+  return [b];
+}
+function routeAround(start, pts) {
+  const out = []; let cur = start;
+  for (const p of pts) {
+    if (hazards().some((o) => inHazard(p, o, padOf(o)))) continue;
+    out.push(...expand(cur, p)); cur = p;
+  }
+  return out;
+}
+function replanAll() {
+  state.robots.forEach((r) => { if (r.path.length) r.path = routeAround({ x: r.x, y: r.y }, r.path); });
+}
+
+// ---------- Planning: built-in rules (fallback) and Claude tool calls ----------
+function queueAdd(keys) {
+  state.robots.forEach((r) => { if (r.status === 'stopped') r.status = 'idle'; });
+  keys.forEach((k) => { if (!state.searched.has(k) && !state.queue.includes(k)) state.queue.push(k); });
+  state.reported = false;
+}
+function ruleSearch(keys) { tr(`search_rooms(${keys.join(', ')})`); queueAdd(keys); }
+
+function stopAll() {
+  state.robots.forEach((r) => { r.path = []; r.target = null; r.status = 'stopped'; });
+  state.queue = []; state.reported = true;
+  log('sys', 'System', 'All robots stopped (hard-coded path, no LLM involved).');
+  speak('scout1', 'All robots stopped.');
+}
+
+function planRegex(textRaw) {
+  const text = textRaw.toLowerCase();
+  if (/stop|halt|freeze/.test(text)) { tr('stop_all()'); stopAll(); return; }
+  const exit = text.match(/exit.*room ([a-d])|room ([a-d]).*exit/);
+  if (exit) {
+    const k = (exit[1] || exit[2]).toUpperCase();
+    const route = k === 'A' || k === 'B' ? 'through the west door into the corridor, then south' : 'through the east door into the corridor, then south';
+    let msg = `From room ${k}, go ${route}. Exit is at the bottom.`;
+    if (state.detections.some((d) => d.kind === 'blocked')) msg += ' Debris in the corridor, keep to the north side.';
+    if (state.detections.some((d) => d.kind === 'fire' && detRoom(d) === k)) msg += ` Fire reported in room ${k}, stay clear.`;
+    if (!state.searched.has(k)) msg += ` Room ${k} is not searched yet, so this is from the floor plan only.`;
+    tr(`answer_question(exit route from room ${k})`);
+    robotSays(state.robots[0], msg);
+    return;
+  }
+  const m = text.match(/(scout|robot) ?([12]).*room ([a-d])/);
+  if (m) {
+    const r = state.robots.find((x) => x.id === 'scout' + m[2]);
+    if (r.status === 'stopped') r.status = 'idle';
+    state.reported = false;
+    tr(`assign_task(${r.id}, ${m[3].toUpperCase()})`);
+    assign(r.id, m[3].toUpperCase());
+    return;
+  }
+  if (/building|everything|whole|entire|all rooms/.test(text)) return ruleSearch(['A', 'B', 'C', 'D']);
+  if (/\beast\b/.test(text)) return ruleSearch(['C', 'D']);
+  if (/\bwest\b/.test(text)) return ruleSearch(['A', 'B']);
+  if (/search|scout|sweep/.test(text)) return ruleSearch(['A', 'B', 'C', 'D']);
+  log('sys', 'System', "I didn't understand that. With the Claude planner on, Claude interprets this and calls a tool.");
+  trNote('dim', 'Built-in rules did not understand this command. No action taken.');
+}
+
+function planCommand(textRaw) {
+  setHeard(textRaw);
+  if (!state.t0) state.t0 = Date.now();
+  log('cmd', 'Commander', textRaw);
+  const t = newTrace(textRaw);
+  if (/\b(stop|halt|freeze|abort)\b/i.test(textRaw)) { t.via = 'built-in rules'; t.why = 'stop never waits for an LLM'; return planRegex(textRaw); }
+  if (!plannerReady) { t.via = 'built-in rules'; t.why = 'planner not configured'; return planRegex(textRaw); }
+  if (plannerKilled) { t.via = 'built-in rules'; t.why = 'planner killed (drill)'; return planRegex(textRaw); }
+  askClaude(textRaw, t);
+}
+
+// Only what the robots have actually observed goes to Claude. Ground truth never does.
+function snapshot() {
+  return {
+    robots: state.robots.map((r) => ({ id: r.id, status: r.status, searching_room: (r.status === 'searching' || r.status === 'verifying') ? r.target : null, location: roomAt(r) || 'corridor' })),
+    rooms_searched: [...state.searched].sort(),
+    rooms_queued: [...state.queue],
+    rooms_not_searched: Object.keys(rooms).filter((k) => !state.searched.has(k)),
+    detections: state.detections.map((d) => ({
+      id: d.id, kind: d.kind, room: detRoom(d), confidence: d.confidence,
+      verified: d.kind === 'victim' ? !!d.verified : undefined, reported_by: d.by,
+    })),
+  };
+}
+
+async function askClaude(text, t) {
+  setStatus('Claude is planning...');
+  const t0 = performance.now();
+  try {
+    const r = await fetch('/plan', { method: 'POST', body: JSON.stringify({ transcript: text, snapshot: snapshot() }) });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    t.via = 'Claude'; t.ms = Math.round(performance.now() - t0);
+    state.lat.plan.push(t.ms);
+    applyCalls(out.calls, t);
+    setStatus('');
+  } catch (e) {
+    t.via = 'built-in rules'; t.why = 'Claude unavailable'; curTrace = t;
+    trNote('bad', 'Claude call failed: ' + String(e).slice(0, 100));
+    setStatus('Claude planner unavailable, used built-in rules: ' + String(e).slice(0, 120));
+    planRegex(text);
+  }
+}
+
+function applyCalls(calls, t) {
+  curTrace = t;
+  if (!calls || !calls.length) { log('sys', 'Claude', '(no action)'); trNote('dim', 'Claude chose no action.'); renderTrace(); return; }
+  for (const c of calls) {
+    const i = c.input || {};
+    if (c.name === 'assign_task') {
+      const room = String(i.room || '').toUpperCase();
+      if (!rooms[room]) { log('sys', 'System', `Ignored assign_task: unknown room "${i.room}".`); tr(`assign_task(${i.robot_id}, ${i.room})`); trNote('bad', 'Rejected: unknown room.'); continue; }
+      let r = state.robots.find((x) => x.id === i.robot_id);
+      if (!r) r = state.robots.find((x) => x.status === 'idle' || x.status === 'returning') || state.robots[0];
+      if (r.status === 'stopped') r.status = 'idle';
+      state.reported = false;
+      log('sys', 'Claude', `assign_task(${r.id}, ${room})`);
+      tr(`assign_task(${r.id}, ${room})`);
+      assign(r.id, room);
+    } else if (c.name === 'search_rooms') {
+      const ks = (i.rooms || []).map((x) => String(x).toUpperCase()).filter((k) => rooms[k]);
+      if (!ks.length) { log('sys', 'System', 'Ignored search_rooms: no valid rooms.'); tr('search_rooms()'); trNote('bad', 'Rejected: no valid rooms.'); continue; }
+      log('sys', 'Claude', `search_rooms(${ks.join(', ')})`);
+      tr(`search_rooms(${ks.join(', ')})`);
+      queueAdd(ks);
+    } else if (c.name === 'stop_all') {
+      log('sys', 'Claude', 'stop_all()');
+      tr('stop_all()');
+      stopAll();
+    } else if (c.name === 'answer_question') {
+      speakGrounded(i);
+    } else {
+      log('sys', 'System', `Ignored unknown tool "${c.name}".`);
+      tr(`${c.name}(...)`); trNote('bad', 'Rejected: not one of the allowed tools.');
+    }
+  }
+}
+
+// A spoken answer may only cite detections that exist, and may not talk about victims that were never logged.
+function speakGrounded(i) {
+  const text = String(i.text || '').trim().slice(0, 220);
+  if (!text) return;
+  const cited = Array.isArray(i.based_on) ? i.based_on : [];
+  tr(`answer_question("${text}"${cited.length ? ', cites: ' + cited.join(', ') : ''})`);
+  const known = new Set(state.detections.map((d) => d.id));
+  const unknown = cited.filter((id) => !known.has(id));
+  const mentionsVictim = /victim|casualt|survivor|person/i.test(text);
+  const hasVictim = state.detections.some((d) => d.kind === 'victim');
+  const negated = /\b(no|not|none|yet|haven't|have not)\b/i.test(text);
+  if (unknown.length || (mentionsVictim && !hasVictim && !negated)) {
+    state.blockedAnswers++;
+    log('sys', 'System', `Blocked a spoken answer that relied on data not in the log${unknown.length ? ' (' + unknown.join(', ') + ')' : ''}.`);
+    trNote('bad', `Grounding check BLOCKED this answer: ${unknown.length ? 'cites ' + unknown.join(', ') + ', which is not in the detection log' : 'it mentions a victim that was never logged'}.`);
+    return;
+  }
+  const r = state.robots.find((x) => x.id === i.robot_id) || state.robots[0];
+  log('sys', 'Claude', `answer_question(cites: ${cited.join(', ') || 'none'})`);
+  trNote('ok', `Grounding check passed${cited.length ? ': every cited detection exists' : ' (no detections cited)'}.`);
+  robotSays(r, text);
+}
+
+function isHazardCell(cx, cy) {
+  const p = { x: cx * CELL + CELL / 2, y: cy * CELL + CELL / 2 };
+  return truth.fires.some((f) => Math.hypot(p.x - f.x, p.y - f.y) < f.r) ||
+         truth.blocked.some((b) => p.x > b.x && p.x < b.x + b.w && p.y > b.y && p.y < b.y + b.h);
+}
+
+// ---------- Phone dispatch (server /dispatch; dry-run unless CALL_ENABLED=1 on the server) ----------
+function showDispatch(out) {
+  const label = { 'dry-run': 'Dry run (no call placed)', placed: 'Call placed to the rescue team phone', failed: 'Call failed', skipped: 'Skipped', rejected: 'Rejected' }[out.mode] || out.mode || 'No response';
+  document.getElementById('dispatch').innerHTML =
+    `<b>${esc(label)}</b>` +
+    (out.brief ? `<div style="color:var(--dim);margin-top:4px">${esc(out.brief)}</div>` : '') +
+    (out.note ? `<div style="margin-top:4px">${esc(out.note)}</div>` : '');
+  return label;
+}
+async function dispatchVictim(det, e) {
+  const room = detRoom(det);
+  if (!rooms[room]) return;
+  const sources = [...new Set(e.sources.map((s) => s.src))];
+  const body = {
+    victim_id: det.id, room,
+    confidence: Math.min(...e.sources.map((s) => s.conf)),   // be conservative: quote the weakest source
+    confirmed_by: sources,
+    // The simulation's search state means nothing for a victim reported by the real vision pipeline, so leave it out.
+    rooms_not_searched: det.live ? undefined : Object.keys(rooms).filter((k) => k !== room && !state.searched.has(k)), // the victim's own room was just entered
+    hazards: state.detections.filter((d) => d.kind !== 'victim').map((d) => ({ kind: d.kind, room: detRoom(d) })),
+  };
+  log('sys', 'Dispatch', `Victim ${det.id} confirmed in ${rooms[room].label} by ${sources.join(' + ')}. Preparing call...`);
+  try {
+    const r = await fetch('/dispatch', { method: 'POST', body: JSON.stringify(body) });
+    const out = await r.json();
+    const label = showDispatch(out);
+    e.dispatch = out.mode; e.note = out.mode === 'placed' ? '' : (out.note || '');
+    if (out.mode === 'placed' || out.mode === 'dry-run') { if (e.status !== 'dispatched') state.calls++; e.status = 'dispatched'; }
+    log('sys', 'Dispatch', label + (out.agent_call_id ? ` (${out.agent_call_id})` : '') + (out.mode === 'failed' || out.mode === 'rejected' || out.mode === 'skipped' ? `: ${out.note || ''}` : ''));
+  } catch (err) {
+    e.dispatch = 'unavailable';
+    log('sys', 'Dispatch', 'Dispatch service unavailable.');
+  }
+  renderEvidence();
+}
+
+// The server fuses sources and places the call even with no browser open; this just mirrors its result.
+function onServerDispatch(m) {
+  const label = showDispatch({ mode: m.mode, brief: m.brief, note: m.note });
+  const e = state.evidence.find((x) => x.id === m.victim_id);
+  if (e) {
+    e.dispatch = m.mode; e.note = m.mode === 'placed' ? '' : (m.note || '');
+    if (m.mode === 'placed' || m.mode === 'dry-run') { if (e.status !== 'dispatched') state.calls++; e.status = 'dispatched'; }
+    renderEvidence();
+  }
+  log('sys', 'Dispatch', `Server: ${label}${m.agent_call_id ? ' (' + m.agent_call_id + ')' : ''}${m.mode === 'failed' || m.mode === 'skipped' ? ': ' + (m.note || '') : ''}`);
+}
+
+function assign(id, roomKey) {
+  const r = state.robots.find((x) => x.id === id), room = rooms[roomKey];
+  r.target = roomKey; r.status = 'searching';
+  const here = roomAt(r);
+  const pre = here && here !== roomKey ? [doorOf(here)] : [];
+  const sweep = [
+    { x: room.x + 30, y: room.y + 30 },
+    { x: room.x + room.w - 30, y: room.y + 30 },
+    { x: room.x + room.w - 30, y: room.y + room.h / 2 },
+    { x: room.x + 30, y: room.y + room.h / 2 },
+    { x: room.x + 30, y: room.y + room.h - 30 },
+    { x: room.x + room.w - 30, y: room.y + room.h - 30 },
+  ];
+  const raw = [...pre, doorOf(roomKey), ...sweep].filter((p, i, a) => i === 0 || p.x !== a[i - 1].x || p.y !== a[i - 1].y);
+  r.path = routeAround({ x: r.x, y: r.y }, raw);
+  log('sys', 'Planner', `assign_task(${r.name}, search ${room.label})`);
+  speak(id, `Searching ${room.label}.`);
+}
+
+// One robot confirms a victim another robot found; the other's sector goes back in the queue.
+function sendVerifier(v, finder) {
+  const other = state.robots.find((x) => x.id !== finder.id);
+  if (!other || other.status === 'stopped' || other.status === 'verifying') return;
+  if (other.status === 'searching' && other.target && !state.searched.has(other.target)) {
+    if (!state.queue.includes(other.target)) state.queue.unshift(other.target);
+    log('sys', 'Planner', `${rooms[other.target].label} unfinished, back in the queue`);
+  }
+  other.status = 'verifying'; other.verifyId = v.id; other.target = v.room;
+  const here = roomAt(other);
+  const pre = here && here !== v.room ? [doorOf(here)] : [];
+  other.path = routeAround({ x: other.x, y: other.y }, [...pre, doorOf(v.room), { x: v.x - 30, y: v.y + 10 }]);
+  log('sys', 'Planner', `redirect(${other.name}, verify victim in ${rooms[v.room].label})`);
+  speak(other.id, `Heading to ${rooms[v.room].label} to confirm.`);
+}
+
+function dispatch() {
+  state.queue = state.queue.filter((k) => !state.searched.has(k));
+  state.robots.forEach((r) => {
+    if (r.status !== 'idle' && r.status !== 'returning') return;
+    const k = state.queue.find((q) => !state.robots.some((o) => o !== r && o.status === 'searching' && o.target === q));
+    if (k) { state.queue.splice(state.queue.indexOf(k), 1); assign(r.id, k); return; }
+    const h = HOME[r.id];
+    if (r.status === 'idle' && Math.hypot(r.x - h.x, r.y - h.y) > 6) {
+      const here = roomAt(r);
+      r.path = routeAround({ x: r.x, y: r.y }, [...(here ? [doorOf(here)] : []), h]);
+      r.status = 'returning';
+    }
+  });
+  const busy = state.robots.some((r) => ['searching', 'verifying', 'returning'].includes(r.status));
+  if (!busy && !state.queue.length && state.searched.size && !state.reported) {
+    state.reported = true;
+    const missed = Object.keys(rooms).filter((k) => !state.searched.has(k));
+    log('sys', 'Planner', `Queue empty. Searched: ${[...state.searched].sort().join(', ')}.` + (missed.length ? ` Not searched: ${missed.join(', ')}.` : ' All rooms searched.') + (state.detections.some((d) => d.kind !== 'victim') ? ' Hazard areas were avoided, not entered.' : ''));
+  }
+}
+
+// ---------- Live detections from the vision pipeline (POST /detection -> SSE) ----------
+function onLive(d) {
+  if (!d || typeof d.id !== 'string') return;
+  const src = String(d.source || 'unknown').toLowerCase().trim();
+  const pct = Math.round(Number(d.confidence) * 100);
+  const note = document.getElementById('cam-note');
+  note.style.display = 'block';
+  note.textContent = `${src}: ${d.description || d.kind} (${pct}%)`;
+
+  if (d.kind === 'victim') {
+    const rm = rooms[d.room];
+    if (!rm) return;
+    let det = state.detections.find((x) => x.id === d.id && x.kind === 'victim');
+    if (!det) {
+      det = { id: d.id, kind: 'victim', room: d.room, x: isNum(d.x) ? d.x : rm.x + rm.w / 2, y: isNum(d.y) ? d.y : rm.y + rm.h / 2, confidence: d.confidence, by: src, verified: false, live: !!d.__srv };
+      state.detections.push(det);
+    }
+    const { e, isNewSource } = addEvidence(d.id, d.room, src, d.confidence, d.description);
+    if (isNewSource) log(tagFor(src), src, `Victim ${d.id} in ${rm.label}, ${pct}%${d.description ? ': ' + d.description : ''}.${e.sources.length < 2 ? ' One source so far, no call.' : ''}`);
+    if (checkConfirm(e, det)) sayDispatch(`Victim in ${rm.label} confirmed by two sources.`);
+  } else if (d.kind === 'fire' || d.kind === 'blocked') {
+    if (state.detections.some((x) => x.id === d.id)) return;
+    const rm = rooms[d.room];
+    let det;
+    if (d.kind === 'fire') {
+      if (!rm && !(isNum(d.x) && isNum(d.y))) return;
+      det = { id: d.id, kind: 'fire', x: isNum(d.x) ? d.x : rm.x + rm.w / 2, y: isNum(d.y) ? d.y : rm.y + rm.h / 2, r: isNum(d.r) ? d.r : 35, confidence: d.confidence, by: src };
+    } else {
+      if (![d.x, d.y, d.w, d.h].every(isNum)) { log('sys', 'System', `Ignored blocked report ${d.id}: needs x, y, w, h.`); return; }
+      det = { id: d.id, kind: 'blocked', x: d.x, y: d.y, w: d.w, h: d.h, confidence: d.confidence, by: src };
+    }
+    state.detections.push(det);
+    replanAll();
+    log(tagFor(src), src, `${d.kind === 'fire' ? 'Fire' : 'Blockage'} ${d.id}${d.room ? ' in room ' + d.room : ''}, ${pct}%. Routes updated.`);
+  }
+}
+
+// ---------- Simulation ----------
+function reveal(r) {
+  const cx = Math.floor(r.x / CELL), cy = Math.floor(r.y / CELL), rad = 3;
+  for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) {
+    const x = cx + dx, y = cy + dy;
+    if (x < 0 || y < 0 || x >= COLS || y >= ROWS || dx*dx + dy*dy > rad*rad) continue;
+    state.grid[y][x] = isHazardCell(x, y) ? 'hazard' : 'clear';
+  }
+  const near = (o) => Math.hypot(o.x - r.x, o.y - r.y) < 65;
+  truth.victims.filter(near).forEach((v) => {
+    if (state.detections.find((d) => d.id === v.id)) return;
+    state.detections.push({ id: v.id, kind: 'victim', room: v.room, x: v.x, y: v.y, confidence: 0.86, by: r.id, verified: false });
+    addEvidence(v.id, v.room, r.id, 0.86, `marker seen by ${r.name}`);
+    robotSays(r, `Victim marker in room ${v.room}. Confidence high.`);
+    sendVerifier(v, r);
+  });
+  truth.fires.filter((f) => Math.hypot(f.x - r.x, f.y - r.y) < f.r + 45).forEach((f) => {
+    if (state.detections.find((d) => d.id === f.id)) return;
+    state.detections.push({ id: f.id, kind: 'fire', room: f.room, x: f.x, y: f.y, r: f.r, confidence: 0.9, by: r.id });
+    replanAll();
+    robotSays(r, `Fire in room ${f.room}. Keeping my distance.`);
+  });
+  truth.blocked.filter((b) => r.x > b.x - 40 && r.x < b.x + b.w + 40 && Math.abs(r.y - (b.y + b.h / 2)) < 50).forEach((b) => {
+    if (state.detections.find((d) => d.id === b.id)) return;
+    state.detections.push({ id: b.id, kind: 'blocked', x: b.x, y: b.y, w: b.w, h: b.h, confidence: 0.8, by: r.id });
+    replanAll();
+    robotSays(r, 'Corridor partly blocked. Rerouting.');
+  });
+}
+
+function step(dt) {
+  state.robots.forEach((r) => {
+    if (!r.path.length) {
+      if (r.status === 'searching') {
+        state.searched.add(r.target); r.status = 'idle';
+        robotSays(r, `${rooms[r.target].label} searched.`);
+      } else if (r.status === 'verifying') {
+        const det = state.detections.find((d) => d.id === r.verifyId);
+        r.status = 'idle';
+        if (det) {
+          const { e } = addEvidence(det.id, detRoom(det), r.id, 0.86, `${r.name} reached the same spot and agrees`);
+          robotSays(r, `Victim in ${rooms[r.target].label} confirmed.`);
+          checkConfirm(e, det);
+        }
+      } else if (r.status === 'returning') {
+        r.status = 'idle';
+      }
+      return;
+    }
+    const p = r.path[0], dx = p.x - r.x, dy = p.y - r.y, d = Math.hypot(dx, dy), v = 90;
+    if (d < 4) { r.path.shift(); return; }
+    r.x += (dx / d) * v * dt; r.y += (dy / d) * v * dt; r.theta = Math.atan2(dy, dx);
+    reveal(r);
+  });
+  dispatch();
+}
+
+// ---------- Rendering ----------
+const ctx = document.getElementById('map').getContext('2d');
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.lineWidth = 2; ctx.strokeStyle = '#4a5063'; ctx.fillStyle = '#171a21';
+  [...Object.values(rooms), corridor].forEach(b => { ctx.fillRect(b.x, b.y, b.w, b.h); ctx.strokeRect(b.x, b.y, b.w, b.h); });
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+    const px = x * CELL, py = y * CELL;
+    if (!inBuilding(px + CELL/2, py + CELL/2)) continue;
+    const g = state.grid[y][x];
+    ctx.fillStyle = g === 'clear' ? 'rgba(40,120,80,.35)' : g === 'hazard' ? 'rgba(255,150,60,.35)' : 'rgba(80,86,100,.28)';
+    ctx.fillRect(px, py, CELL, CELL);
+  }
+  ctx.fillStyle = '#8b92a3'; ctx.font = '12px system-ui';
+  Object.values(rooms).forEach(r => ctx.fillText(r.label, r.x + 8, r.y + 16));
+  ctx.fillText('Corridor', corridor.x + 8, corridor.y + 16);
+  ctx.fillStyle = '#4be08a'; ctx.fillText('EXIT', exitPt.x - 12, exitPt.y);
+
+  state.detections.forEach(d => {
+    if (d.kind === 'victim') {
+      ctx.fillStyle = '#4be08a'; ctx.beginPath(); ctx.arc(d.x, d.y, 8, 0, 7); ctx.fill();
+      ctx.fillStyle = '#0b0d12'; ctx.fillText(d.verified ? '✓' : 'V', d.x - 4, d.y + 4);
+      ctx.save(); ctx.strokeStyle = '#4be08a'; ctx.lineWidth = 1.5;
+      if (!d.verified) ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.arc(d.x, d.y, 13, 0, 7); ctx.stroke(); ctx.restore();
+    }
+    if (d.kind === 'fire') { ctx.fillStyle = 'rgba(255,90,71,.55)'; ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, 7); ctx.fill(); }
+    if (d.kind === 'blocked') { ctx.fillStyle = '#ffd24d'; ctx.fillRect(d.x, d.y, d.w, d.h); }
+  });
+
+  state.robots.forEach(r => {
+    ctx.save(); ctx.translate(r.x, r.y); ctx.rotate(r.theta);
+    ctx.fillStyle = r.color; ctx.beginPath(); ctx.arc(0, 0, 11, 0, 7); ctx.fill();
+    ctx.fillStyle = '#0b0d12'; ctx.fillRect(4, -2, 9, 4); ctx.restore();
+    ctx.fillStyle = r.color; ctx.fillText(r.name, r.x + 14, r.y - 10);
+  });
+}
+function inBuilding(x, y) {
+  return [...Object.values(rooms), corridor].some(b => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
+}
+const setText = (id, v) => { const el = document.getElementById(id); if (el.textContent !== v) el.textContent = v; };
+function stats() {
+  let inb = 0, clear = 0, haz = 0;
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+    if (!inBuilding(x*CELL + CELL/2, y*CELL + CELL/2)) continue;
+    inb++;
+    if (state.grid[y][x] === 'clear') clear++;
+    else if (state.grid[y][x] === 'hazard') haz++;
+  }
+  const pc = (n) => Math.round(100 * n / inb);
+  const vic = state.detections.filter(d => d.kind === 'victim');
+  setText('s-clear', pc(clear) + '%');
+  setText('s-hcell', pc(haz) + '%');
+  setText('s-unk', pc(inb - clear - haz) + '%');
+  setText('s-vic', `${vic.length} (${vic.filter(v => v.verified).length})`);
+  setText('m-rooms', `${state.searched.size} / 4`);
+  setText('m-held', String(state.evidence.filter((e) => e.status === 'unverified').length));
+  setText('m-calls', String(state.calls));
+  setText('m-blocked', String(state.blockedAnswers));
+  setText('m-first', state.firstConfirmMs === null ? '-' : (state.firstConfirmMs / 1000).toFixed(1) + ' s');
+  const p = avg(state.lat.plan), v = avg(state.lat.voice);
+  setText('m-plan', p === null ? '-' : p + ' ms');
+  setText('m-voice', v === null ? '-' : v + ' ms');
+}
+
+let last = performance.now();
+function loop(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; step(dt); draw(); stats(); requestAnimationFrame(loop); }
+
+// ---------- Wiring ----------
+function resetLocal() {
+  state = freshState(); trace = []; curTrace = null; speakQueue.length = 0;
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('dispatch').textContent = 'No calls yet.';
+  document.getElementById('cam-note').style.display = 'none';
+  document.getElementById('v-heard').textContent = 'Say or type a command.'; document.getElementById('v-heard').classList.add('dim');
+  document.getElementById('v-said').textContent = 'Nothing yet.'; document.getElementById('v-said').classList.add('dim');
+  document.getElementById('v-who').textContent = '';
+  const chip = document.getElementById('v-lat'); chip.textContent = 'voice latency: no lines yet'; chip.classList.remove('good');
+  renderTrace(); renderEvidence();
+  log('sys', 'System', 'Mission reset. All cells unexplored.');
+}
+function resetAll() { resetLocal(); fetch('/reset', { method: 'POST' }).catch(() => {}); liveCount = 0; renderBadges(); }
+
+document.getElementById('send').onclick = () => { const i = document.getElementById('cmd'); if (i.value.trim()) { planCommand(i.value.trim()); i.value = ''; } };
+document.getElementById('cmd').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('send').click(); });
+document.getElementById('reset').onclick = resetAll;
+document.getElementById('mic').onclick = () => {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return setStatus('Browser speech recognition not available. Type the command instead. Real build: Cartesia Ink.');
+  const rec = new SR(); rec.lang = 'en-US';
+  rec.onresult = e => planCommand(e.results[0][0].transcript);
+  rec.onerror = e => setStatus('Mic error: ' + e.error);
+  rec.start(); setStatus('Listening...');
+};
+
+// Failure drill
+document.getElementById('kill').onchange = (e) => {
+  plannerKilled = e.target.checked;
+  log('sys', 'System', plannerKilled ? 'Drill: Claude planner switched off. Commands use built-in rules.' : 'Drill over: Claude planner back on.');
+  renderBadges();
+};
+let injectCount = 0;
+document.getElementById('inject').onclick = () => {
+  const room = ['A', 'D', 'C', 'B'][injectCount % 4]; injectCount++;
+  onLive({ id: 'x' + injectCount, kind: 'victim', room, confidence: 0.55, source: 'drone', description: 'person-shaped object (injected test)' });
+};
+document.getElementById('second').onclick = () => {
+  const held = [...state.evidence].reverse().find((e) => e.status === 'unverified');
+  if (!held) { setStatus('Nothing is held. Inject a single-source detection first.'); return; }
+  onLive({ id: held.id, kind: 'victim', room: held.room, confidence: 0.8, source: 'camera2', description: 'second source agrees (simulated)' });
+};
+
+(async () => {
+  resetLocal();
+  try {
+    const c = await (await fetch('/config')).json();
+    voiceReady = c.voiceReady; plannerReady = c.plannerReady; plannerModel = c.plannerModel || ''; callMode = c.callMode || 'dry-run'; cameraUrl = c.cameraUrl || '';
+  } catch { voiceReady = false; plannerReady = false; }
+  const q = new URLSearchParams(location.search).get('cam');
+  if (q && /^https?:\/\//i.test(q)) cameraUrl = q;
+  if (cameraUrl) {
+    const img = document.getElementById('cam-img');
+    img.onerror = () => { img.hidden = true; const e = document.getElementById('cam-empty'); e.hidden = false; e.textContent = 'Camera feed unreachable: ' + cameraUrl; };
+    img.onload = () => { img.hidden = false; document.getElementById('cam-empty').hidden = true; };
+    img.src = cameraUrl;
+  }
+  renderBadges();
+  setStatus(voiceReady ? '' : 'Silent mode: set the Cartesia env vars to hear the robots.');
+  try {
+    const es = new EventSource('/events');
+    es.onopen = () => { liveConnected = true; renderBadges(); };
+    es.onerror = () => { liveConnected = false; renderBadges(); };
+    es.onmessage = (m) => {
+      try {
+        const d = JSON.parse(m.data);
+        if (d && d.type === 'dispatch') return onServerDispatch(d); // the server placed (or dry-ran) the call itself
+        liveCount++; renderBadges(); d.__srv = true; onLive(d);
+      } catch (e) { console.error(e); }
+    };
+  } catch { /* no live feed in this browser */ }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
