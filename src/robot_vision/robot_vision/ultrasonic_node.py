@@ -1,7 +1,27 @@
+import sys
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32
+
+# Attempt clean hardware pin reset to release any lingering locks
+try:
+    import RPi.GPIO as GPIO
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+    GPIO.cleanup([23, 24, 17, 27, 5, 6])
+except Exception:
+    pass
+
+# Prefer RPiGPIOFactory when available to avoid lgpio kernel lockouts
+try:
+    from gpiozero.pins.rpigpio import RPiGPIOFactory
+    from gpiozero import Device
+    Device.pin_factory = RPiGPIOFactory()
+except Exception:
+    pass
+
 from gpiozero import DistanceSensor
+
 
 class MultiUltrasonicPublisher(Node):
     def __init__(self):
@@ -42,6 +62,11 @@ class MultiUltrasonicPublisher(Node):
             self.sensor_center.close()
             self.sensor_left.close()
             self.sensor_right.close()
+        except Exception:
+            pass
+        try:
+            import RPi.GPIO as GPIO
+            GPIO.cleanup()
         except Exception:
             pass
         super().destroy_node()
