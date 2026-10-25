@@ -200,7 +200,7 @@ def render_two_robots():
     dst = np.float32([[150, 1000], [1750, 990], [1450, 200], [450, 220]])
     P = cv2.getPerspectiveTransform(src, dst)
     view = cv2.warpPerspective(floor, P, (1920, 1080), borderValue=(120, 125, 130))
-    # Camera pixels -> floor metres, as floor_setup.py would compute from 4 clicked corners.
+    # Camera pixels -> floor metres, as setup_camera.py would compute from 4 clicked corners.
     Hcam = cv2.getPerspectiveTransform(dst, np.float32([[0, 0], [4.5, 0], [4.5, 4.0], [0, 4.0]]))
     return view, Hcam, truth
 

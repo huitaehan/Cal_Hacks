@@ -5,7 +5,7 @@ the dot layout ("pattern_layout" in config.json): on the SSL pattern ("ssl") the
 apart than the two back ones, so the SSL layout is fitted to the 4 dots (all 4 ways round) and a clearly
 best fit gives the front. Evenly spaced dots ("even") can't show the front by position, so the adjacent
 pink pair is taken as the front; an all-pink robot then has no heading.
-Blobs are found in the image and mapped to floor metres with the homography from floor_setup.py, so
+Blobs are found in the image and mapped to floor metres with the homography from setup_camera.py, so
 distances and angles are real ones.
 Only these coloured markers are looked for; the camera never looks for people.
 """
@@ -17,7 +17,7 @@ import numpy as np
 
 from tracker import Pose, apply_h
 
-# OpenCV HSV (hue 0-179). A lower hue above the upper one wraps around red. Tune with colours.py.
+# OpenCV HSV (hue 0-179). A lower hue above the upper one wraps around red. Tune with setup_camera.py (step 2).
 DEFAULT_COLOURS = {"blue": [[95, 100, 60], [130, 255, 255]],
                    "pink": [[140, 70, 80], [179, 255, 255]],
                    "green": [[40, 80, 50], [85, 255, 255]]}
@@ -157,7 +157,7 @@ class ColourTracker:
 
     @property
     def status(self):
-        return None if self.H is not None else "no floor mapping yet: run  python floor_setup.py"
+        return None if self.H is not None else "no floor mapping yet: run  python setup_camera.py"
 
     def detect(self, frame):
         """Pixel blobs: [(colour, cx, cy, (x, y, w, h))]."""

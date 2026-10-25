@@ -8,7 +8,7 @@ from pathlib import Path
 from floorplan import FloorPlan
 from presence_server import App, Settings
 from rooms import RoomEvidence
-from test_localizer import FakeLink, FakeRegistry
+from test_localizer import TH, FakeLink, FakeRegistry
 
 EXAMPLE = Path(__file__).resolve().parent / "floorplan.example.json"
 
@@ -233,8 +233,8 @@ def test_single_pair_motion_doesnt_mark_a_room():
 class _WanderLink(FakeLink):
     def snapshot(self, now):
         return {"tx": self.tx, "rx": self.rx, "rate": 40.0,
-                "detector": {"ratio": max(0.0, self.ratio) / 1.8, "score": self.ratio,
-                             "detected": self.ratio > 1.8}}
+                "detector": {"ratio": max(0.0, self.ratio) / TH, "score": self.ratio,
+                             "detected": self.ratio > TH}}
 
 
 def test_wander_one_strong_pair_marks_its_room():
@@ -244,7 +244,7 @@ def test_wander_one_strong_pair_marks_its_room():
         plan["boards"] = {"aa": [0.2, 1.0], "bb": [1.8, 1.0], "cc": [1.0, 0.2], "dd": [1.0, 1.8]}
         path = Path(d) / "floorplan.json"
         path.write_text(json.dumps(plan))
-        for scores, expected in [((2.5, 0.5), False), ((2.5, 2.0), True)]:   # pair means 1.5 and 2.25
+        for scores, expected in [((2.5, 0.1), False), ((2.5, 2.0), True)]:   # pair means 1.3 and 2.25 (threshold 1.4)
             app = App([], Settings(10, detector="wander"), record=False, reset_on_start=False,
                       floorplan_path=path, rooms_loop=False)
             app.registry = FakeRegistry([_WanderLink("aa", "bb", scores[0]), _WanderLink("bb", "aa", scores[1]),

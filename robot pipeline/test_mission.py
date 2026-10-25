@@ -204,6 +204,48 @@ def test_sentry_spots_are_moved_off_walls():
     assert m.sentry == {"A": (3.0, 2.0), "B": (0.0, 2.0)}, m.sentry
 
 
+def test_follow_mode_goes_straight_to_the_person_and_tracks_them():
+    m = Mission(cfg(follow=True))
+    w = World(m)
+    goals = w.run(0.25, person=(3.0, 2.0))          # first tick: no settling, no hold
+    assert m.state == "follow" and m.robot == "A", m.state
+    assert math.dist(goals["A"], (3.45, 2.0)) < 1e-6, goals      # 45 cm short, on A's side
+    assert goals["B"] == SENTRY["B"]
+    goals = w.run(0.25, person=(3.0, 3.0))          # the person moved 1 m: re-aimed at once
+    assert abs(math.dist(goals["A"], (3.0, 3.0)) - 0.45) < 1e-6, goals
+
+
+def test_follow_mode_marks_found_once_and_goes_home_after_losing_the_person():
+    m = Mission(cfg(follow=True, follow_lost_s=3.0))
+    w = World(m, travel_s=1.0)
+    w.run(2.0, person=(3.0, 2.0))                   # the robot gets there after 1 s
+    assert m.state == "found" and len(m.found) == 1, (m.state, m.found)
+    w.run(2.0, person=(3.05, 2.0))                  # small moves: stays, no second FOUND
+    assert len(m.found) == 1
+    goals = w.run(2.0)                              # lost for 2 s: waits next to the spot
+    assert m.state == "found" and goals["A"] == m.target, (m.state, goals)
+    goals = w.run(1.5)                              # lost for 3.5 s: back to its spot
+    assert m.state in ("return", "sentry") and goals["A"] == SENTRY["A"], (m.state, goals)
+
+
+def test_follow_mode_takes_over_from_a_manual_move():
+    m = Mission(cfg(follow=True))
+    w = World(m)
+    m.goto(0.0, "A", (1.0, 1.0))
+    w.run(1.0)
+    assert m.state == "manual"
+    w.run(0.25, person=(3.0, 2.0))
+    assert m.state == "follow"
+
+
+def test_follow_mode_pause_still_stops_everything():
+    m = Mission(cfg(follow=True))
+    w = World(m)
+    m.pause(0.0)
+    goals = w.run(0.5, person=(3.0, 2.0))
+    assert m.state == "paused" and all(g is None for g in goals.values()), goals
+
+
 if __name__ == "__main__":
     test_sentry_spots_are_moved_off_walls()
     test_targets_are_moved_off_walls()
@@ -220,4 +262,8 @@ if __name__ == "__main__":
     test_pause_stops_everything_and_resume_goes_back_to_sentry()
     test_manual_goto_sends_one_robot_and_recall_brings_it_back()
     test_targets_stay_inside_the_area()
+    test_follow_mode_goes_straight_to_the_person_and_tracks_them()
+    test_follow_mode_marks_found_once_and_goes_home_after_losing_the_person()
+    test_follow_mode_takes_over_from_a_manual_move()
+    test_follow_mode_pause_still_stops_everything()
     print("ok")

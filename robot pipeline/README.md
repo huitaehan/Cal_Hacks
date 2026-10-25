@@ -17,29 +17,24 @@ by the WiFi sensing.
 
 ## What's left (needs you)
 
-1. **Camera:** tilt it to see as much of the area as possible, put robot B at the far edge, and run
-   `.\.venv\Scripts\python.exe tracker.py --camera 1 --snapshot cam.png`. Send me the printed lines so I
-   can check the dots are still read at the far side.
-2. **Walls and robot area:** sketch the cardboard layout to fit what the camera sees (from step 1), with
-   each wall's ends in cm from the front-left corner. I'll put the walls in the WiFi floor plan and set the
-   robots' `area` and `sentry` spots in `config.json`. Then build it as in
-   [Making the cardboard match the floor plan](#making-the-cardboard-match-the-floor-plan).
-3. **Board placement (decided):** fixed boards at waist height around the area, measured from the same
-   corner marks as the walls. This is the default in `config.json`; if boards ever ride on the robots,
-   rename each robot's `"board_if_carried"` to `"sensing_mac"`.
-4. **Colours** (`colours.py`) and **robot-top mapping** (`floor_setup.py`): setup steps 2 and 3 below.
-5. **Robot firmware:** WiFi name and password in `firmware\robot_motor\wifi_config.h`, then flash both
-   robots (step 5). Robot A's pattern (4 pink) hasn't been seen by the camera yet.
-6. **Calibrate** each robot (step 6).
-7. **Guided WiFi test:** confirms the detector and measures crouch, sit and lie detection, plus false alarms
+1. **Robot controller:** a Raspberry Pi on robot A, on the `rescuebots` hotspot, running `pi_robot.py`
+   (setup step 4). The 4 ESP32-C5s are all sensing boards. Robot B comes later.
+2. **Calibrate** each robot (setup step 5).
+3. **Walls:** sketch the cardboard layout inside the taped zone, with each wall's ends in cm from the
+   front-left corner. I'll put the walls in the WiFi floor plan and set the robots' parking spots. Then
+   build it as in [Making the cardboard match the floor plan](#making-the-cardboard-match-the-floor-plan).
+   Keep the walls no taller than the robots' tops, so the camera always sees over them.
+4. **Boards:** fixed, at waist height, 25 cm outside the middle of each taped edge (the spots in
+   `..\wifi detection\host\floorplan.json`), measured from the same corner marks as the walls. If boards
+   ever ride on the robots, rename each robot's `"board_if_carried"` to `"sensing_mac"` in `config.json`.
+5. **Guided WiFi test:** confirms the detector and measures crouch, sit and lie detection, plus false alarms
    from onlookers.
 
 | File | What it does |
 |---|---|
-| `colour_tracker.py` | The robots' SSL-Vision patterns: blue centre blob plus 4 dots. The dot colours say which robot it is (A: 4 pink, B: 2 pink + 2 green), and the dot layout gives the heading (the SSL front dots are wider apart than the back ones). |
+| `colour_tracker.py` | The robots' SSL-Vision patterns: blue centre blob plus 4 dots. The dot colours say which robot it is (set by `pattern` in `config.json`: now A = 2 pink + 2 green, the top on the robot with the Pi; B = 4 pink), and the dot layout gives the heading (the SSL front dots are wider apart than the back ones). |
 | `tracker.py` | Camera thread and drawing. Uses colour tracking, or printed ArUco markers if `"tracking": "aruco"` in `config.json`. |
-| `floor_setup.py` | Maps the camera onto the robots' tops: click a robot standing on each area corner. Any camera angle works. |
-| `colours.py` | Tunes blue, pink and green to the room's lighting: click each colour on the robots. |
+| `setup_camera.py` | Camera setup over the taped zone in one window: aim, tune the colours, click the 4 tape corners and map the camera onto the robots' tops, then check the border, grid and how reliably each robot is read. Any camera angle works. |
 | `planner.py` | Paths around the cardboard walls (A* on a 5 cm grid, kept 13 cm clear of walls), and driving along them. |
 | `drive.py` | Drive-to-point for omni robots (no turning needed), with safety stops. UDP link to the robots; robots find the laptop by broadcasting `HELLO`. |
 | `mission.py` | sentry → dispatch → verify → found → return; plus pause, recall and manual moves. |
@@ -48,6 +43,7 @@ by the WiFi sensing.
 | `calibrate.py` | Works out which way each robot drives relative to its pattern. |
 | `markers.py` | Only for ArUco mode: writes `markers/print.html`, the markers to print. |
 | `firmware/robot_motor/` | The team's motion code (`move`, `dir_move`) plus a WiFi/USB command receiver and a 300 ms safety stop. |
+| `pi_robot.py` | The same firmware in Python for a Raspberry Pi, for a robot without a working ESP32: same UDP commands, HELLO and 300 ms stop, so the laptop side doesn't change. Wiring and usage are at the top of the file. |
 | `config.json` | Robots (dot pattern, sentry spot), where robots may drive (`area`), robot size, camera, server URL. Same floor frame as `..\wifi detection\host\floorplan.json`. |
 
 Python: use this folder's `.venv\Scripts\python.exe`, a standalone Python 3.12 with numpy and OpenCV 4.x
@@ -56,41 +52,65 @@ and OpenCV 5.0 can't open cameras by number on Windows.
 
 ## Setup, in order
 
-1. **Camera:** mount it as high as you can, looking over the area. An angle is fine; it doesn't need to be
-   straight down. The C922 is camera 1 (the laptop's own webcam is 0).
+1. **Camera:** mount it as high as you can, looking over the taped zone. An angle is fine; it doesn't need
+   to be straight down. The C922 is camera 1 (the laptop's own webcam is 0).
    - If the sensing boards ride on the robots, mount each stick at the edge of the robot's top, between
      dots, so it doesn't hide the blue centre or a dot.
-2. **Colours:** run `python colours.py` with both robots in view. Press `b` and click the blue centre,
-   `p` and click pink dots, `g` and click green dots, a few times each and in different parts of the
-   area. Each robot should show 1 blue and 4 dot circles, and nothing else should light up. Press `s`.
-3. **Robot-top mapping:** tape the 4 corners of the robots' `area` on the floor. Run
-   `python floor_setup.py`, stand a robot on each corner mark in turn, and click its blue centre, in this
-   order: front-left, front-right, back-right, back-left. The click snaps to the blue blob. Press `s`.
-   Redo this if the camera moves.
-   - Clicking at robot-top height matters: the colours sit on the robots' tops, and a mapping clicked on
-     the bare floor can put robots far from the camera tens of centimetres off.
-4. **Check tracking:** run `python tracker.py`. Each robot should show an arrow, its position and its
-   heading. If robots A and B are swapped, swap their `pattern` entries in `config.json`.
-   - The robots use the SSL dot layout (checked on robot B: front pink pair 1.57 times wider apart than the
-     back green pair; the SSL standard is 1.56), so `"pattern_layout": "ssl"`. For evenly spaced dots it
-     would be `"even"`.
-5. **Robot firmware:**
-   1. Put the network name and password in `firmware\robot_motor\wifi_config.h`. Use a 5 GHz network,
-      or 2.4 GHz channel 1 or 11, because the sensing boards use channel 6. The laptop must be on the same
-      network.
-   2. Flash with `.\flash_robot.ps1 -Port COM12 -Robot A`, and the same for B.
-   3. Bench test over WiFi: `python drive.py A 40 0 1.0` drives robot A at speed 40 in its direction 0
-      for 1 s. If Windows asks, allow Python through the firewall on private networks. Over USB, the
-      Arduino Serial Monitor (115200) also accepts `D 1 40 0 0`, but each line only drives for 0.3 s
-      because of the safety stop, so the robot just twitches.
-6. **Calibrate each robot:** run `python calibrate.py A`, then `python calibrate.py B`, with 0.5 m of free
+2. **Camera setup:** run `python setup_camera.py` with robots A and B in view (no other robot tops: a
+   second top with B's colours confuses which one is B). It asks, in **cm**, the taped zone's width and
+   depth and the robots' height (floor to the dots), then walks through 4 steps in one window, saving as it
+   goes:
+   1. **Aim:** tilt the camera until all the tape is in view, with about 15 cm spare all round.
+   2. **Colours:** press `b` and click the blue centre, `p` and click pink dots, `g` and click green dots,
+      a few times each, near and far. Each robot should show 1 blue and 4 dot circles, and nothing else
+      should light up. Saves `colours.json`.
+   3. **Corners:** click the 4 taped corners in order front-left, front-right, back-right, back-left
+      (front = your side); a magnifier follows the mouse. Corners clicked in the wrong order or mirrored
+      are refused. The measured depth is checked two ways: by the tape's shape in the image (needs a
+      tilted camera) and by the robots' dots, which look squashed when the depth is wrong. Press `z` to
+      re-enter the sizes. Saves `floor.json`, and the zone's size as `area` in `config.json` (parking
+      spots outside it are moved in).
+   4. **Check:** the zone's border (green, on the tape, corners labelled), a 0.5 m grid and each robot's
+      position. Stand a robot centred on a tape corner: it should read that corner within about 2 cm. Move
+      each robot along the edge farthest from the camera, where the dots look smallest: its "read" share
+      should stay near 100 %.
+   - Redo step 3 if the camera moves.
+   - Why the robots' height: the camera sees the dots on the robots' tops, in line with a floor point
+     farther from the camera, so the floor mapping alone would put robots several cm too far out (about
+     8 cm at the far side with a 10 cm robot and the camera 1.3 m up). The script works out where the
+     camera is from the tape, using the C922's focal length (1360 px at 1920 wide; set
+     `"focal_px"` under `"camera"` for another camera), and maps the robots at their own height.
+   - If robots A and B come out swapped, swap their `pattern` entries in `config.json`. The robots use the
+     SSL dot layout (checked on robot B: front pink pair 1.57 times wider apart than the back green pair;
+     the SSL standard is 1.56), so `"pattern_layout": "ssl"`.
+3. **Live tracking view, any time:** `python tracker.py`. It shows each robot's arrow, position and heading,
+   the zone's border, and the walls.
+4. **Robot controller (Raspberry Pi):**
+   1. **Network:** a phone hotspot named `rescuebots`, on 5 GHz if the phone offers it (the sensing boards
+      use 2.4 GHz channel 6). The laptop joins it too. If the phone can't, the laptop's Windows Mobile
+      Hotspot with the same name and password works the same.
+   2. **SD card:** Raspberry Pi Imager, Raspberry Pi OS Lite (64-bit). In its settings: hostname `robota`,
+      a username and password, WiFi `rescuebots` with its password, WiFi country, and SSH on.
+   3. **Files:** with the card still in the laptop, `.\copy_to_pi.ps1` copies `pi_robot.py` and `pi\` onto
+      it. Then boot the Pi, `ssh <user>@robota.local`, and run `sudo bash /boot/firmware/robot/install.sh A`
+      once: it starts robot A now and at every boot, and turns off WiFi power saving. (Or, on a running Pi:
+      `.\copy_to_pi.ps1 -Ssh <user>@robota.local` copies and installs in one go.)
+   4. **Wiring:** the motor driver's 6 inputs from the ESP32's pins to the Pi's, as at the top of
+      `pi_robot.py`, plus a Pi GND. Check with the wheels off the floor: `sudo systemctl stop pi-robot;
+      sudo python3 /opt/robot/pi_robot.py A --spin; sudo systemctl start pi-robot` turns each motor forward
+      then back.
+   5. **Bench test from the laptop:** `python drive.py A 40 0 1.0` drives robot A at speed 40 in its
+      direction 0 for 1 s. If Windows asks, allow Python through the firewall on private networks.
+   - The ESP32 version of the same program is `firmware\robot_motor` (`flash_robot.ps1`), for a robot
+     with its own ESP32.
+5. **Calibrate each robot:** run `python calibrate.py A`, then `python calibrate.py B`, with 0.5 m of free
    floor around each robot. It drives briefly in two directions, saves `calibration.json`, then drives back
    to its start as a check. This also absorbs any difference between the pattern's front and the
    robot's own direction 0. Until a robot is calibrated, `run.py` won't drive it.
-7. **Walls:** the walls are the `"walls"` line segments in `..\wifi detection\host\floorplan.json`, in
+6. **Walls:** the walls are the `"walls"` line segments in `..\wifi detection\host\floorplan.json`, in
    metres: `[[x1, y1], [x2, y2]]` per wall, with gaps for the openings. Build and check them as in the
    next section.
-8. **Run:**
+7. **Run:**
    1. Start the WiFi server: `..\wifi detection\run_dashboard.ps1`.
    2. Start the pipeline: `python run.py`.
    3. Keep the area clear while the robots reach their spots and settle (about 10 s).
@@ -100,7 +120,7 @@ and OpenCV 5.0 can't open cameras by number on Windows.
 The walls, the camera mapping and the sensing boards are all measured from the same 4 tape marks, so they
 can't disagree with each other.
 
-1. **Tape the area's 4 corners first.** Front-left is (0, 0); x runs to the right as seen from the door,
+1. **Tape the area's 4 corners first.** Front-left is (0, 0); x runs to the right as seen from the front (your side),
    y away from the door. Check the rectangle is square: both diagonals must be the same length (for
    W × D, √(W² + D²); 6.02 m for 4.5 × 4.0 m).
 2. **Each wall is two ends in cm from the front-left mark.** Leave openings of at least 40 cm: the robot is
@@ -110,7 +130,7 @@ can't disagree with each other.
    For a wall parallel to an edge, measure its offset at both ends so it stays parallel. Stand the cardboard
    with the tape line along the middle of its thickness, and tape or weigh it down so a robot brushing it
    doesn't shift it.
-4. **The camera uses the same marks:** in `floor_setup.py`, stand the robot centred on each corner mark.
+4. **The camera uses the same marks:** in `setup_camera.py` step 3 you click the 4 tape corners.
 5. **The sensing boards too:** put each at its floor-plan spot, measured from the same marks, at waist
    height.
 6. **Check with the camera:** `python tracker.py` draws the floor-plan walls in red and shows each robot's
@@ -159,7 +179,8 @@ A robot is stopped, not driven, when:
 
 ## Limits to know
 
-- Positions are exact only at robot-top height (step 3).
+- Positions assume the robot height you entered in `setup_camera.py`, and a camera close to the C922's focal
+  length; expect about 1 cm of error, more near the image edges where the lens bends straight lines.
 - Tall walls hide robots from an angled camera; a robot the camera can't see is stopped.
 - The WiFi position is roughly ±0.5–1 m, and two people show up as one.
 

@@ -6,11 +6,12 @@ Each packet's amplitudes are compared with the average shape of the last 2 s
 Correlation ignores how loud the packet is, so AGC gain steps don't count as
 motion. Links differ a lot in how noisy they are at rest, so the score is
 log(wander / the link's 5th percentile over the last 5 minutes): 0 means as calm
-as this link gets, and 1.8 (6x its calm level) counts as motion.
+as this link gets, and 1.4 (4x its calm level) counts as motion.
 
-On the labelled live test 2 (replayed), one board pair above 1.8 for 0.5 s
-caught 94 % of the time someone walked inside, against 6 % for someone walking
-0.5-1 m outside and 0 % with nobody near. ESPectre with two agreeing pairs: 86 %,
+On the labelled live test 2 (replayed), one board pair above 1.4 for 0.5 s
+caught 99 % of the time someone walked inside, against 26 % for someone walking
+0.5-1 m outside and 1 % with nobody near (1.8, 6x: 94 %, 6 %, 0 %; lowered on
+2026-10-25 because small motions such as waving while crouched were being missed). ESPectre with two agreeing pairs: 86 %,
 48 % and 0 %. ESPectre's model was trained at 100 packets/s and our links run at
 20-44; packet rate barely matters here (thinning 44 -> 22 pps: AUC 0.90 -> 0.88).
 """
@@ -32,11 +33,14 @@ class WanderLinkDetector:
     WINDOW_S = 2.0          # shape window
     EVAL_S = 0.25           # one evaluation per 250 ms
     MIN_SAMPLES = 5         # per window
+    TARGET_RATE = 14.0      # packets/s kept: a faster link keeps every k-th packet, so the gateway's own links
+                            # (40-46/s) are judged like relayed ones (about 16/s). On every packet they read numb:
+                            # Oct 25 front edge fired 3 % of the time vs 17-24 %; every 3rd packet, 10 %.
     BASELINE_S = 300.0      # history the calm level is taken from
     BASELINE_PCT = 5
     BASELINE_MIN = 20       # evaluations (5 s) before scores are reported
     REFRESH_EVALS = 8       # recompute the calm level every 2 s
-    THRESHOLD = 1.8         # log(wander / calm level)
+    THRESHOLD = 1.4         # log(wander / calm level): 4x the link's calm level
     HOLD_EVALS = 2          # the score must hold for 2 evaluations (0.5 s)
     VALID_AMP = 2.0         # subcarriers averaging below this are nulls
 
@@ -48,6 +52,9 @@ class WanderLinkDetector:
         with self.lock:
             self._t = collections.deque()
             self._a = collections.deque()
+            self._arrivals = collections.deque()   # every packet's arrival time, for the link's rate
+            self._seen = 0
+            self._keep_every = 1
             self._hist = collections.deque(maxlen=int(self.BASELINE_S / self.EVAL_S))
             self._recent = collections.deque(maxlen=self.HOLD_EVALS)
             self._baseline = None
@@ -62,6 +69,15 @@ class WanderLinkDetector:
             return
         t = device_ts_us / 1e6 if device_ts_us is not None else t_s
         with self.lock:
+            self._arrivals.append(t_s)
+            while self._arrivals[0] < t_s - self.WINDOW_S:
+                self._arrivals.popleft()
+            ideal = len(self._arrivals) / self.WINDOW_S / self.TARGET_RATE    # 38-48/s: 3; relayed: 1
+            if abs(ideal - self._keep_every) > 0.75:     # sticky: a pick that keeps shifting adds noise
+                self._keep_every = max(1, int(ideal + 0.5))
+            self._seen += 1
+            if self._seen % self._keep_every:
+                return
             if self._t and (t < self._t[-1] - 1.0 or (self._a and a.size != self._a[-1].size)):
                 self._t.clear()          # board clock restarted, or a different CSI layout
                 self._a.clear()

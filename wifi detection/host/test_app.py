@@ -7,6 +7,9 @@ import numpy as np
 
 from floorplan import FloorPlan
 from presence_server import App, Settings
+from wander import WanderLinkDetector
+
+TH = WanderLinkDetector.THRESHOLD
 
 EXAMPLE = Path(__file__).resolve().parent / "floorplan.example.json"
 ROBOT_A = "d0:cf:13:e1:63:30"
@@ -81,8 +84,8 @@ class _WanderLink:
 
     def snapshot(self, now):
         from presence_server import EMPTY_DETECTOR
-        det = dict(EMPTY_DETECTOR, calibrated=True, ratio=max(0.0, self.score) / 1.8, score=self.score,
-                   detected=self.score > 1.8)
+        det = dict(EMPTY_DETECTOR, calibrated=True, ratio=max(0.0, self.score) / TH, score=self.score,
+                   detected=self.score > TH)
         return {"tx": self.tx, "rx": self.rx, "rate": 25.0, "relayed": False, "rssi": -50.0, "detector": det}
 
 
@@ -90,8 +93,8 @@ def test_wander_pair_averages_its_two_directions():
     """One noisy direction alone doesn't make a pair; the pair's mean score must clear the threshold."""
     app = App([], Settings(10, detector="wander"), record=False, reset_on_start=False,
               floorplan_path=EXAMPLE, rooms_loop=False)
-    app.registry = _Registry([_WanderLink("aa", "bb", 2.4), _WanderLink("bb", "aa", 0.6)])
-    assert app.state()["summary"]["detected"] is False       # mean 1.5
+    app.registry = _Registry([_WanderLink("aa", "bb", 2.4), _WanderLink("bb", "aa", 0.2)])
+    assert app.state()["summary"]["detected"] is False       # mean 1.3, under the 1.4 threshold
     app.registry = _Registry([_WanderLink("aa", "bb", 2.4), _WanderLink("bb", "aa", 1.6),
                               _WanderLink("cc", "dd", 0.3)])
     assert app.state()["summary"]["detected"] is True        # mean 2.0, and one pair is enough

@@ -34,6 +34,10 @@ class MissionConfig:
     found_radius_m: float = 1.0
     found_ignore_s: float = 60.0   # don't re-dispatch to a found spot for this long
     return_timeout_s: float = 20.0  # a robot not home by then is parked where it is
+    follow: bool = False        # follow mode: the nearest robot goes straight to each WiFi position and keeps
+                                # re-aiming; no settling, holding, listening or ignored spots
+    follow_retarget_m: float = 0.25    # follow mode: re-aim once the position moves this far
+    follow_lost_s: float = 8.0  # follow mode: no detection for this long, back to the spot
 
 
 def _dist(a, b):
@@ -61,6 +65,8 @@ class Mission:
         self._progress_t = 0.0
         self._hits: list = []
         self._ticks = 0
+        self._last_seen = 0.0       # follow mode: last WiFi position
+        self._episode_found = False
 
     # operator commands
     def pause(self, now):
@@ -106,6 +112,8 @@ class Mission:
 
         if self.state == "paused":
             return {r: None for r in self.sentry}
+        if c.follow:
+            return self._follow(now, pos, person, home, holds)
 
         if self.state == "return":
             seen = [r for r in self.sentry if r in pos]
@@ -184,6 +192,51 @@ class Mission:
                 return dict(self.sentry)
         goals[self.robot] = self.target
         return goals
+
+    def _follow(self, now, pos, person, home, holds):
+        """Follow mode: follow -> found (once per episode) while the WiFi position lasts; return when it's lost.
+        A detection also ends a manual move."""
+        c = self.cfg
+        seen = [r for r in self.sentry if r in pos]
+        if person is not None and seen:
+            self._last_seen = now
+            if self.state not in ("follow", "found"):
+                self.robot = min(seen, key=lambda r: _dist(pos[r], person))
+                self._aim(now, person, pos[self.robot])
+                self._episode_found = False
+                self._set(now, "follow")
+                self.note(now, f"Motion near ({person[0]:.1f}, {person[1]:.1f}): robot {self.robot} following")
+            elif self.robot in pos and _dist(person, self._aimed_at) > c.follow_retarget_m:
+                self._aim(now, person, pos[self.robot])
+                self._set(now, "follow")
+            if (self.state == "follow" and self.robot in pos
+                    and _dist(pos[self.robot], self.target) <= c.arrive_tol_m):
+                if not self._episode_found:
+                    self._episode_found = True
+                    self.found.append((now, person[0], person[1]))
+                    self.note(now, f"FOUND: person near ({person[0]:.1f}, {person[1]:.1f}); "
+                                   f"robot {self.robot} is with them")
+                self._set(now, "found")
+        elif self.state in ("follow", "found") and now - self._last_seen >= c.follow_lost_s:
+            self._set(now, "return")
+            self.note(now, f"No motion for {c.follow_lost_s:.0f} s: robot {self.robot} going back to its spot")
+
+        if self.state in ("follow", "found", "manual"):
+            goals = dict(holds)
+            goals[self.robot] = self.target
+            return goals
+        if self.state == "return":
+            back = [r for r in self.sentry if r in pos]
+            if back and all(home(r) for r in back):
+                self._set(now, "sentry")
+                self.note(now, "Robots on their spots: watching")
+            elif now - self._since >= c.return_timeout_s:
+                self.parked.update(r for r in back if not home(r))
+                self._set(now, "sentry")
+            else:
+                return dict(self.sentry)
+        self.parked -= {r for r in self.parked if home(r)}
+        return {r: (None if r in self.parked else self.sentry[r]) for r in self.sentry}
 
     def _set(self, now, state):
         if self.state == "sentry" and state != "sentry":

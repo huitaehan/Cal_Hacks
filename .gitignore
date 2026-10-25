@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Raw WiFi recordings: they reach hundreds of MB (GitHub refuses files over 100 MB).
+# The ones already in the repo stay tracked; new ones stay on the laptop that recorded them.
+wifi detection/host/recordings/*.log
+
+# Run output
+robot pipeline/mission_log.txt

@@ -99,6 +99,23 @@ def test_recorded_walk_breadcrumb_to_gateway():
     assert np.mean(inside) >= 0.35, np.mean(inside)
 
 
+def test_a_fast_link_keeps_every_third_packet_like_a_relayed_one():
+    """The gateway measures its own links at 40-46 packets/s; relayed links arrive at about 16/s. Judged on
+    every packet, the gateway's links read numb: on Oct 25 the front edge fired 3 % of the time against
+    17-24 % for relayed links, and 10 % keeping every 3rd packet (no extra false alarms on labelled test 2)."""
+    rng = np.random.default_rng(1)
+    base = 20 + 10 * np.sin(np.arange(52) / 4)
+    fast, slow = WanderLinkDetector(), WanderLinkDetector()
+    for i in range(45 * 6):                                       # 6 s at 45 packets/s
+        fast.push(i / 45, base + rng.normal(0, 2.0, 52))
+    for i in range(16 * 6):                                       # 6 s at 16 packets/s
+        slow.push(i / 16, base + rng.normal(0, 2.0, 52))
+    assert 28 <= len(fast._a) <= 34, len(fast._a)                 # a 2 s window at about 15/s
+    gaps = np.diff(np.array(fast._t)) * 45
+    assert np.allclose(gaps, 3), gaps                             # a fixed every-3rd, not a shifting pick
+    assert len(slow._a) >= 31                                     # all of a relayed link's packets kept
+
+
 if __name__ == "__main__":
     test_not_ready_until_it_knows_the_link()
     test_quiet_link_never_fires()
@@ -106,4 +123,5 @@ if __name__ == "__main__":
     test_agc_gain_step_is_not_motion()
     test_gateway_clock_restart_starts_a_new_window()
     test_recorded_walk_breadcrumb_to_gateway()
+    test_a_fast_link_keeps_every_third_packet_like_a_relayed_one()
     print("ok")

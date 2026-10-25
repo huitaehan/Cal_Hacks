@@ -159,6 +159,8 @@ def main():
     # Right-click only: the left click that focuses the window must not move a robot.
     cv2.setMouseCallback("mission", lambda ev, x, y, *_: click.append((x, y)) if ev == cv2.EVENT_RBUTTONDOWN else None)
     printed = 0
+    log = open(HERE / "mission_log.txt", "a", buffering=1)     # the events, kept for looking back at a run
+    log.write(time.strftime("\n%Y-%m-%d %H:%M:%S run.py started\n"))
     try:
         while True:
             now = time.time()
@@ -168,7 +170,9 @@ def main():
             p.step(now)
             m = p.mission
             for t, e in m.events[len(m.events) - (m.n_logged - printed):]:
-                print(time.strftime("%H:%M:%S", time.localtime(t)), e, flush=True)
+                line = f"{time.strftime('%H:%M:%S', time.localtime(t))} {e}"
+                print(line, flush=True)
+                log.write(line + "\n")
             printed = m.n_logged
 
             frame, det = cam.snapshot()
@@ -189,6 +193,7 @@ def main():
         cam.close()
         wifi.close()
         link.close()
+        log.close()
         cv2.destroyAllWindows()
 
 

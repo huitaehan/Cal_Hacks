@@ -9,6 +9,9 @@ from pathlib import Path
 import numpy as np
 
 from presence_server import Localizer
+from wander import WanderLinkDetector
+
+TH = WanderLinkDetector.THRESHOLD
 
 BOARDS = {"aa": (0.0, 0.0), "bb": (3.0, 0.0), "cc": (3.0, 3.0), "dd": (0.0, 3.0)}
 
@@ -107,7 +110,7 @@ class _WanderLink:
 
     def snapshot(self, now):
         return {"tx": self.tx, "rx": self.rx, "rate": 40.0,
-                "detector": {"ratio": max(0.0, self.score) / 1.8, "score": self.score, "detected": self.score > 1.8}}
+                "detector": {"ratio": max(0.0, self.score) / TH, "score": self.score, "detected": self.score > TH}}
 
 
 class _WanderRegistry(FakeRegistry):
@@ -127,7 +130,7 @@ def test_wander_one_strong_pair_places_the_person():
         r = loc.snapshot()
     assert r["person"] is not None
     pair = next(p for p in r["pairs"] if {p["a"], p["b"]} == {"aa", "bb"})
-    assert pair["detected"] and abs(pair["ratio"] - 2.5 / 1.8) < 1e-6, pair
+    assert pair["detected"] and abs(pair["ratio"] - 2.5 / TH) < 1e-6, pair
 
 
 def test_nobody():

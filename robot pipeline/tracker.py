@@ -2,7 +2,7 @@
 
 Two ways, chosen by "tracking" in config.json:
 - "colour" (default): the robots' SSL-Vision colour patterns (colour_tracker.py), with the floor mapping
-  from 4 clicked corners (floor_setup.py).
+  from 4 clicked corners (setup_camera.py).
 - "aruco": printed markers; four on the floor at known spots fix the camera-to-floor mapping, one on top
   of each robot gives its position and heading.
 Only these markers are looked for; the camera never looks for people.
@@ -114,10 +114,13 @@ def make_tracker(cfg: dict):
     if cfg.get("tracking", "colour") == "aruco":
         return FloorTracker(cfg["floor_markers"], {r["marker"]: name for name, r in cfg["robots"].items()})
     from colour_tracker import DEFAULT_COLOURS, ColourTracker
-    H = json.loads(FLOOR.read_text())["H"] if FLOOR.exists() else None
+    floor = json.loads(FLOOR.read_text()) if FLOOR.exists() else {}
     colours = json.loads(COLOURS.read_text()) if COLOURS.exists() else DEFAULT_COLOURS
-    return ColourTracker({name: r["pattern"] for name, r in cfg["robots"].items()}, H, colours,
-                         cfg.get("pattern_radius_m", 0.065), cfg.get("pattern_layout", "ssl"))
+    ct = ColourTracker({name: r["pattern"] for name, r in cfg["robots"].items()}, floor.get("H"), colours,
+                       cfg.get("pattern_radius_m", 0.065), cfg.get("pattern_layout", "ssl"))
+    if "H_floor" in floor:                  # robots are read at their tops; the tape and walls are on the floor
+        ct.H_floor = np.asarray(floor["H_floor"], float)
+    return ct
 
 
 def open_camera(cam: dict):
@@ -208,11 +211,17 @@ def draw(frame, ft, det, poses: dict, area=None, extra=None, walls=None):
         return frame
     Hi = np.linalg.inv(ft.H)
     px = lambda pts: apply_h(Hi, pts).astype(int)
-    if area:
+    Hf = getattr(ft, "H_floor", None)          # floor-level mapping, if known: tape and walls sit on the floor
+    on_floor = px if Hf is None else (lambda pts: apply_h(np.linalg.inv(Hf), pts).astype(int))
+    if area:                                    # the zone's border, its corners labelled in metres
         (x0, y0), (x1, y1) = area
-        cv2.polylines(frame, [px([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])], True, (0, 200, 0), 2)
+        corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        cv2.polylines(frame, [on_floor(corners)], True, (0, 200, 0), 3)
+        for (cx, cy), q in zip(corners, on_floor(corners)):
+            cv2.putText(frame, f"({cx:.2f}, {cy:.2f})", tuple(q + [8, -8]), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                        (0, 200, 0), 2)
     for a, b in walls or []:
-        cv2.line(frame, *map(tuple, px([a, b])), (40, 40, 220), 4)
+        cv2.line(frame, *map(tuple, on_floor([a, b])), (40, 40, 220), 4)
     for name, p in poses.items():
         a = px([(p.x, p.y)])[0]
         if p.heading is None:
