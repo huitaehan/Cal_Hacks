@@ -65,6 +65,14 @@ class NavigatorNode(Node):
             10
         )
 
+        # 4. Detected Victim/Person from Camera (The Eyes)
+        self.victim_sub = self.create_subscription(
+            Point,
+            '/detected_person',
+            self.victim_callback,
+            10
+        )
+
         # -----------------------------
         # Publisher (The Body)
         # -----------------------------
@@ -73,14 +81,17 @@ class NavigatorNode(Node):
         # -----------------------------
         # Internal State
         # -----------------------------
-        self.target_x = 0.0
+        # Default to Exploration Mode with dead-reckoning so robot navigates out-of-the-box
+        self.target_x = 4.0
         self.target_y = 0.0
-        self.has_target = False
+        self.has_target = True
+        self.has_odom = True
+        self.using_internal_odom = True
+        self.mode = "EXPLORATION"  # "EXPLORATION", "VICTIM_PURSUIT", or "TARGET_PURSUIT"
 
         self.robot_x = 0.0
         self.robot_y = 0.0
         self.robot_theta = 0.0  # Heading in radians [-pi, pi]
-        self.has_odom = False
 
         # Sensor readings (default to 2.0 meters = clear)
         self.front_dist = 2.0
@@ -102,22 +113,36 @@ class NavigatorNode(Node):
         # 10Hz Control Loop (0.1s interval)
         self.dt = 0.1
         self.timer = self.create_timer(self.dt, self.control_loop)
-        self.get_logger().info("Artificial Potential Field Navigator Node initialized.")
+        self.get_logger().info("Artificial Potential Field Navigator Node initialized (Autonomous Exploration Active).")
 
     # -----------------------------
     # Callbacks
     # -----------------------------
+    def victim_callback(self, msg: Point):
+        # msg: x=dist_meters, y=bearing_deg, z=confidence
+        if msg.z >= 0.35 and msg.x > 0.2:
+            bearing_rad = math.radians(msg.y)
+            abs_theta = self.robot_theta + bearing_rad
+            self.target_x = self.robot_x + msg.x * math.cos(abs_theta)
+            self.target_y = self.robot_y + msg.x * math.sin(abs_theta)
+            self.mode = "VICTIM_PURSUIT"
+            self.get_logger().info(
+                f"Victim sighted at {msg.x:.2f}m ({msg.y:.1f} deg)! Navigating to target ({self.target_x:.2f}, {self.target_y:.2f})"
+            )
+
     def target_callback(self, msg: Point):
         # Only log if target actually changes by more than 5cm
         if not self.has_target or math.hypot(msg.x - self.target_x, msg.y - self.target_y) > 0.05:
             self.target_x = msg.x
             self.target_y = msg.y
             self.has_target = True
+            self.mode = "TARGET_PURSUIT"
             self.get_logger().info(
-                f"New target -> ({self.target_x:.2f}, {self.target_y:.2f})"
+                f"New target -> ({self.target_x:.2f}, {self.target_y:.2f}) [TARGET_PURSUIT]"
             )
 
     def odom_callback(self, msg: Odometry):
+        self.using_internal_odom = False
         new_x = msg.pose.pose.position.x
         new_y = msg.pose.pose.position.y
 
@@ -209,15 +234,20 @@ class NavigatorNode(Node):
         # 1. Goal Arrival Check
         # -----------------------------
         if dist_to_goal <= goal_tol:
-            cmd.linear.x = 0.0
-            cmd.angular.z = 0.0
-            self.vel_pub.publish(cmd)
-            self.get_logger().info(
-                f"Target reached! (Dist: {dist_to_goal:.2f}m <= {goal_tol:.2f}m)",
-                throttle_duration_sec=2.0
-            )
-            self.stalled_time = 0.0
-            return
+            if self.mode == "EXPLORATION":
+                # In exploration mode, keep moving forward into new space
+                self.target_x = self.robot_x + 4.0 * math.cos(self.robot_theta)
+                self.target_y = self.robot_y + 4.0 * math.sin(self.robot_theta)
+            else:
+                cmd.linear.x = 0.0
+                cmd.angular.z = 0.0
+                self.vel_pub.publish(cmd)
+                self.get_logger().info(
+                    f"Target reached! (Dist: {dist_to_goal:.2f}m <= {goal_tol:.2f}m)",
+                    throttle_duration_sec=2.0
+                )
+                self.stalled_time = 0.0
+                return
 
         # -----------------------------
         # 2. Local Minima Escape Maneuver
@@ -387,8 +417,14 @@ class NavigatorNode(Node):
         else:
             self.stalled_time = 0.0
 
+        # Internal dead-reckoning integration if external odometry is not available
+        if self.using_internal_odom:
+            self.robot_theta = self.normalize_angle(self.robot_theta + cmd.angular.z * self.dt)
+            self.robot_x += cmd.linear.x * math.cos(self.robot_theta) * self.dt
+            self.robot_y += cmd.linear.x * math.sin(self.robot_theta) * self.dt
+
         self.get_logger().info(
-            f"APF: GoalDist={dist_to_goal:.2f}m | FrontClearance={self.front_dist:.2f}m -> CmdVel: v={cmd.linear.x:.2f} m/s, w={cmd.angular.z:.2f} rad/s",
+            f"APF [{self.mode}]: TargetDist={dist_to_goal:.2f}m | Front={self.front_dist:.2f}m, L={self.left_dist:.2f}m, R={self.right_dist:.2f}m -> CmdVel: v={cmd.linear.x:.2f} m/s, w={cmd.angular.z:.2f} rad/s",
             throttle_duration_sec=1.0
         )
         self.vel_pub.publish(cmd)
