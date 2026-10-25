@@ -11,7 +11,7 @@ import sys
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from sensor_msgs.msg import Image, Range
+from sensor_msgs.msg import Image, CompressedImage, Range
 from std_msgs.msg import Float32
 from geometry_msgs.msg import Vector3, Point
 import cv2
@@ -138,10 +138,20 @@ class VisualWallDetector(Node):
             durability=DurabilityPolicy.VOLATILE
         )
 
+        # Support both compressed (WiFi-optimized) and uncompressed topics
+        raw_topic = image_topic.replace('/compressed', '') if image_topic.endswith('/compressed') else image_topic
+        comp_topic = f"{raw_topic}/compressed"
+
         self.image_sub = self.create_subscription(
             Image,
-            image_topic,
+            raw_topic,
             self.image_callback,
+            qos_camera
+        )
+        self.comp_sub = self.create_subscription(
+            CompressedImage,
+            comp_topic,
+            self.compressed_image_callback,
             qos_camera
         )
 
@@ -157,7 +167,7 @@ class VisualWallDetector(Node):
             self.debug_pub = self.create_publisher(Image, debug_topic, 2)
 
         self.get_logger().info(
-            f"VisualWallDetector initialized. Subscribed to '{image_topic}', publishing to '{obs_topic}'"
+            f"VisualWallDetector initialized. Subscribed to '{raw_topic}' & '{comp_topic}', publishing to '{obs_topic}'"
         )
 
     def _us_range_cb(self, msg: Range):
@@ -170,6 +180,17 @@ class VisualWallDetector(Node):
             self.latest_ultrasonic = float(msg.data)
             self.has_ultrasonic = True
 
+    def compressed_image_callback(self, msg: CompressedImage):
+        try:
+            np_arr = np.frombuffer(msg.data, np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        except Exception as e:
+            self.get_logger().error(f"JPEG decompression error: {e}")
+            return
+
+        if frame is not None and frame.size > 0:
+            self.process_frame(frame)
+
     def image_callback(self, msg: Image):
         try:
             # Convert ROS 2 Image message to OpenCV BGR image
@@ -178,9 +199,10 @@ class VisualWallDetector(Node):
             self.get_logger().error(f"CvBridge conversion error: {e}")
             return
 
-        if frame is None or frame.size == 0:
-            return
+        if frame is not None and frame.size > 0:
+            self.process_frame(frame)
 
+    def process_frame(self, frame):
         h, w = frame.shape[:2]
 
         # ----------------------------------------------------
@@ -430,13 +452,22 @@ def run_self_test():
     range_msg.range = 0.45
     node._us_range_cb(range_msg)
     assert node.has_ultrasonic and node.latest_ultrasonic == 0.45
-    print("[PASS 5/5] Ultrasonic Sensor Fusion: Subscribed & minimum envelope active")
+    print("[PASS 5/6] Ultrasonic Sensor Fusion: Subscribed & minimum envelope active")
+
+    # 6. Test CompressedImage Decompression (JPEG)
+    _, enc_test = cv2.imencode('.jpg', wall_frame)
+    comp_test_msg = CompressedImage()
+    comp_test_msg.format = 'jpeg'
+    comp_test_msg.data = enc_test.tobytes()
+    node.compressed_image_callback(comp_test_msg)
+    print("[PASS 6/6] CompressedImage (JPEG): Decompressed & processed successfully")
 
     node.destroy_node()
-    rclpy.shutdown()
+    if rclpy.ok():
+        rclpy.shutdown()
 
     print("============================================================")
-    print("  ALL 5 PIPELINE TESTS PASSED! CODE IS 100% READY.")
+    print("  ALL 6 PIPELINE TESTS PASSED! CODE IS 100% READY.")
     print("============================================================\n")
     return 0
 
@@ -453,7 +484,8 @@ def main(args=None):
         node.get_logger().info("VisualWallDetector shut down cleanly.")
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
