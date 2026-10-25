@@ -37,12 +37,28 @@ class MultiUltrasonicPublisher(Node):
         msg_r.data = float(self.sensor_right.distance * 100.0)
         self.pub_right.publish(msg_r)
 
+    def destroy_node(self):
+        try:
+            self.sensor_center.close()
+            self.sensor_left.close()
+            self.sensor_right.close()
+        except Exception:
+            pass
+        super().destroy_node()
+
+
 def main(args=None):
     rclpy.init(args=args)
     node = MultiUltrasonicPublisher()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
