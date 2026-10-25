@@ -57,7 +57,19 @@ except ImportError:
             img_msg.data = cv_image.tobytes()
             return img_msg
 
-from robot_vision.detector import VictimDetector, Detection
+# Allow running as a standalone python script as well as installed ROS 2 node
+import os
+_parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+_curr_dir = os.path.dirname(os.path.abspath(__file__))
+if _curr_dir not in sys.path:
+    sys.path.insert(0, _curr_dir)
+
+try:
+    from robot_vision.detector import VictimDetector, Detection
+except ImportError:
+    from detector import VictimDetector, Detection
 
 
 class VisualWallDetector(Node):
