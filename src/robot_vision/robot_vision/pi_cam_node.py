@@ -32,6 +32,7 @@ class PiCameraNode(Node):
         self.declare_parameter('fps', 20.0)
         self.declare_parameter('image_topic', '/image_raw')
         self.declare_parameter('jpeg_quality', 60)
+        self.declare_parameter('publish_raw', False)
 
         dev = self.get_parameter('video_device').value
         w = int(self.get_parameter('width').value)
@@ -39,6 +40,7 @@ class PiCameraNode(Node):
         fps = float(self.get_parameter('fps').value)
         self.topic = str(self.get_parameter('image_topic').value)
         self.jpeg_quality = int(self.get_parameter('jpeg_quality').value)
+        self.publish_raw = bool(self.get_parameter('publish_raw').value)
 
         # Open camera using OpenCV V4L2 backend with hardware MJPG decoding
         if isinstance(dev, str) and dev.startswith('/dev/video'):
@@ -68,8 +70,11 @@ class PiCameraNode(Node):
         )
 
         # Use qos_profile_sensor_data (BestEffort) for real-time video streaming without UDP queue bloating
-        self.pub_image = self.create_publisher(Image, self.topic, qos_profile_sensor_data)
         self.pub_compressed = self.create_publisher(CompressedImage, f"{self.topic}/compressed", qos_profile_sensor_data)
+        if self.publish_raw:
+            self.pub_image = self.create_publisher(Image, self.topic, qos_profile_sensor_data)
+        else:
+            self.pub_image = None
 
         timer_period = 1.0 / max(1.0, fps)
         self.timer = self.create_timer(timer_period, self.capture_and_publish)
@@ -93,17 +98,18 @@ class PiCameraNode(Node):
             comp_msg.data = enc_buf.tobytes()
             self.pub_compressed.publish(comp_msg)
 
-        # 2. Publish uncompressed Image for local nodes
-        msg = Image()
-        msg.header.stamp = stamp
-        msg.header.frame_id = 'camera_optical_link'
-        msg.height = h
-        msg.width = w
-        msg.encoding = 'bgr8'
-        msg.is_bigendian = 0
-        msg.step = w * 3
-        msg.data = frame.tobytes()
-        self.pub_image.publish(msg)
+        # 2. Optionally publish uncompressed Image (disabled by default to prevent Wi-Fi bandwidth choking)
+        if self.publish_raw and self.pub_image is not None:
+            msg = Image()
+            msg.header.stamp = stamp
+            msg.header.frame_id = 'camera_optical_link'
+            msg.height = h
+            msg.width = w
+            msg.encoding = 'bgr8'
+            msg.is_bigendian = 0
+            msg.step = w * 3
+            msg.data = frame.tobytes()
+            self.pub_image.publish(msg)
 
     def destroy_node(self):
         if self.cap and self.cap.isOpened():
