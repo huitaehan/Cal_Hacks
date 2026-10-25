@@ -30,12 +30,24 @@ MOTOR_PINS = {
 MAX_POWER = 40
 MIN_POWER_CUTOFF = 12  # Minimum power to overcome DC motor static friction
 
+# Activate Raspberry Pi internal pull-down resistors so pins NEVER float to HIGH
+import subprocess
+for _p in (17, 27, 22, 23, 24, 25):
+    try:
+        subprocess.run(["pinctrl", "set", str(_p), "pd"], capture_output=True)
+    except Exception:
+        pass
+    try:
+        subprocess.run(["raspi-gpio", "set", str(_p), "pd"], capture_output=True)
+    except Exception:
+        pass
+
 motors = {}
 try:
     motors = {
         name: (
-            PWMOutputDevice(forward_pin, frequency=1000),
-            PWMOutputDevice(reverse_pin, frequency=1000),
+            PWMOutputDevice(forward_pin, frequency=1000, initial_value=0.0),
+            PWMOutputDevice(reverse_pin, frequency=1000, initial_value=0.0),
         )
         for name, (forward_pin, reverse_pin) in MOTOR_PINS.items()
     }
@@ -166,12 +178,15 @@ def main(args=None):
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-        for pair in motors.values():
-            for device in pair:
-                try:
-                    device.close()
-                except Exception:
-                    pass
+        for _p in (17, 27, 22, 23, 24, 25):
+            try:
+                subprocess.run(["pinctrl", "set", str(_p), "pd"], capture_output=True)
+            except Exception:
+                pass
+            try:
+                subprocess.run(["raspi-gpio", "set", str(_p), "pd"], capture_output=True)
+            except Exception:
+                pass
 
 
 if __name__ == '__main__':
