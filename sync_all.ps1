@@ -12,9 +12,9 @@ scp c:\Users\Huitae\Cal_Hacks\src\robot_vision\robot_vision\visual_wall_detector
 scp c:\Users\Huitae\Cal_Hacks\src\robot_core\robot_core\navigator_node.py asus@${GX10_IP}:/home/asus/calhacks/src/robot_core/robot_core/navigator_node.py
 
 Write-Host "`n>>> [2/2] Syncing to Raspberry Pi ($PI_IP)... (Enter password for robot1 if prompted)" -ForegroundColor Cyan
-scp c:\Users\Huitae\Cal_Hacks\pi_bringup.py c:\Users\Huitae\Cal_Hacks\src\robot_vision\robot_vision\pi_cam_node.py c:\Users\Huitae\Cal_Hacks\src\robot_vision\robot_vision\ultrasonic_node.py robot1@${PI_IP}:~/
+scp c:\Users\Huitae\Cal_Hacks\motor_node.py c:\Users\Huitae\Cal_Hacks\pi_bringup.py c:\Users\Huitae\Cal_Hacks\src\robot_vision\robot_vision\pi_cam_node.py c:\Users\Huitae\Cal_Hacks\src\robot_vision\robot_vision\ultrasonic_node.py robot1@${PI_IP}:~/
 
 Write-Host "`n>>> [SUCCESS] All nodes synchronized successfully across LAN!" -ForegroundColor Green
 Write-Host "To run robot:"
-Write-Host "  Raspberry Pi: python3 ~/pi_bringup.py" -ForegroundColor Yellow
+Write-Host "  Raspberry Pi: python3 ~/pi_bringup.py & python3 ~/motor_node.py" -ForegroundColor Yellow
 Write-Host "  ASUS GX10:    python3 launch_gx10.py" -ForegroundColor Yellow

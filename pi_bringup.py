@@ -22,8 +22,8 @@ from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import Float32
 import cv2
 
-# Unexport any stale sysfs pins to prevent lgpio 'GPIO busy' kernel collisions
-for pin in (23, 24, 17, 27, 5, 6):
+# Unexport any stale sysfs pins for ultrasonics (12, 13, 20, 21, 5, 6)
+for pin in (12, 13, 20, 21, 5, 6):
     try:
         if os.path.exists(f'/sys/class/gpio/gpio{pin}'):
             with open('/sys/class/gpio/unexport', 'w') as f:
@@ -35,7 +35,7 @@ for pin in (23, 24, 17, 27, 5, 6):
 try:
     import lgpio
     _h = lgpio.gpiochip_open(0)
-    for _p in (23, 24, 17, 27, 5, 6):
+    for _p in (12, 13, 20, 21, 5, 6):
         try:
             lgpio.gpio_free(_h, _p)
         except Exception:
@@ -120,22 +120,22 @@ class UnifiedUltrasonic(Node):
         for attempt in range(3):
             if self.sensor_center is None:
                 try:
-                    self.sensor_center = DistanceSensor(echo=24, trigger=23)
-                    self.get_logger().info("Center Ultrasonic initialized (23/24)")
+                    self.sensor_center = DistanceSensor(echo=13, trigger=12)
+                    self.get_logger().info("Center Ultrasonic initialized (Trig=12, Echo=13)")
                 except Exception as e:
                     if attempt == 2:
-                        self.get_logger().warn(f"Center Ultrasonic (23/24) init: {e}")
+                        self.get_logger().warn(f"Center Ultrasonic (12/13) init: {e}")
             if self.sensor_left is None:
                 try:
-                    self.sensor_left = DistanceSensor(echo=27, trigger=17)
-                    self.get_logger().info("Left Ultrasonic initialized (17/27)")
+                    self.sensor_left = DistanceSensor(echo=21, trigger=20)
+                    self.get_logger().info("Left Ultrasonic initialized (Trig=20, Echo=21)")
                 except Exception as e:
                     if attempt == 2:
-                        self.get_logger().warn(f"Left Ultrasonic (17/27) init: {e}")
+                        self.get_logger().warn(f"Left Ultrasonic (20/21) init: {e}")
             if self.sensor_right is None:
                 try:
                     self.sensor_right = DistanceSensor(echo=6, trigger=5)
-                    self.get_logger().info("Right Ultrasonic initialized (5/6)")
+                    self.get_logger().info("Right Ultrasonic initialized (Trig=5, Echo=6)")
                 except Exception as e:
                     if attempt == 2:
                         self.get_logger().warn(f"Right Ultrasonic (5/6) init: {e}")
