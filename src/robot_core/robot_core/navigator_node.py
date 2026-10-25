@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist, Point, Vector3
+from std_msgs.msg import Float32
 from nav_msgs.msg import Odometry
 import math
 
@@ -72,6 +73,14 @@ class NavigatorNode(Node):
             self.victim_callback,
             10
         )
+
+        # 5. Direct Ultrasonic Sensor Subscriptions (center, left, right)
+        self.sub_us_c1 = self.create_subscription(Float32, '/ultrasonic_center', self._us_center_cb, 10)
+        self.sub_us_c2 = self.create_subscription(Float32, 'ultrasonic_center', self._us_center_cb, 10)
+        self.sub_us_l1 = self.create_subscription(Float32, '/ultrasonic_left', self._us_left_cb, 10)
+        self.sub_us_l2 = self.create_subscription(Float32, 'ultrasonic_left', self._us_left_cb, 10)
+        self.sub_us_r1 = self.create_subscription(Float32, '/ultrasonic_right', self._us_right_cb, 10)
+        self.sub_us_r2 = self.create_subscription(Float32, 'ultrasonic_right', self._us_right_cb, 10)
 
         # -----------------------------
         # Publisher (The Body)
@@ -177,6 +186,21 @@ class NavigatorNode(Node):
         self.front_dist = msg.x
         self.left_dist = msg.y
         self.right_dist = msg.z
+
+    def _us_center_cb(self, msg: Float32):
+        if msg.data > 0.0:
+            m = float(msg.data) / 100.0 if float(msg.data) > 5.0 else float(msg.data)
+            self.front_dist = m
+
+    def _us_left_cb(self, msg: Float32):
+        if msg.data > 0.0:
+            m = float(msg.data) / 100.0 if float(msg.data) > 5.0 else float(msg.data)
+            self.left_dist = m
+
+    def _us_right_cb(self, msg: Float32):
+        if msg.data > 0.0:
+            m = float(msg.data) / 100.0 if float(msg.data) > 5.0 else float(msg.data)
+            self.right_dist = m
 
     @staticmethod
     def normalize_angle(angle: float) -> float:

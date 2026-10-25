@@ -130,9 +130,21 @@ class VisualWallDetector(Node):
 
             # Auto-subscribe to triple ultrasonic topics from ultrasonic_node.py
             self.sub_us_center = self.create_subscription(Float32, 'ultrasonic_center', self._us_center_cb, 10)
+            self.sub_us_center2 = self.create_subscription(Float32, '/ultrasonic_center', self._us_center_cb, 10)
             self.sub_us_left = self.create_subscription(Float32, 'ultrasonic_left', self._us_left_cb, 10)
+            self.sub_us_left2 = self.create_subscription(Float32, '/ultrasonic_left', self._us_left_cb, 10)
             self.sub_us_right = self.create_subscription(Float32, 'ultrasonic_right', self._us_right_cb, 10)
+            self.sub_us_right2 = self.create_subscription(Float32, '/ultrasonic_right', self._us_right_cb, 10)
             self.get_logger().info(f"Sensor Fusion enabled: Subscribed to '{us_topic}' and 'ultrasonic_center/left/right'")
+
+        # Camera sector clearances default
+        self.cam_dist_front = 2.0
+        self.cam_dist_left = 2.0
+        self.cam_dist_right = 2.0
+
+        # Periodic timer (10Hz) to guarantee /obstacle_status is always published
+        # even if camera stream is temporarily idle or ultrasonic is solo
+        self.fusion_timer = self.create_timer(0.1, self._publish_fused_clearances)
 
         # ----------------------------------------------------
         # QoS Profile Configuration
@@ -178,11 +190,24 @@ class VisualWallDetector(Node):
             f"VisualWallDetector initialized. Subscribed to '{raw_topic}' & '{comp_topic}', publishing to '{obs_topic}'"
         )
 
+    def _publish_fused_clearances(self):
+        center_sensor = self.latest_us_center if self.latest_us_center is not None else (self.latest_ultrasonic if self.has_ultrasonic else None)
+        fused_center = float(min(self.cam_dist_front, center_sensor)) if center_sensor is not None else float(self.cam_dist_front)
+        fused_left = float(min(self.cam_dist_left, self.latest_us_left)) if self.latest_us_left is not None else float(self.cam_dist_left)
+        fused_right = float(min(self.cam_dist_right, self.latest_us_right)) if self.latest_us_right is not None else float(self.cam_dist_right)
+
+        obs_msg = Vector3()
+        obs_msg.x = float(fused_center)  # Front clearance (fused)
+        obs_msg.y = float(fused_left)    # Left clearance (fused)
+        obs_msg.z = float(fused_right)   # Right clearance (fused)
+        self.obstacle_pub.publish(obs_msg)
+
     def _us_range_cb(self, msg: Range):
         if msg.range > 0.0:
             self.latest_ultrasonic = float(msg.range)
             self.has_ultrasonic = True
             self.latest_us_center = float(msg.range)
+            self._publish_fused_clearances()
 
     def _us_float_cb(self, msg: Float32):
         if msg.data > 0.0:
@@ -191,6 +216,7 @@ class VisualWallDetector(Node):
             self.latest_ultrasonic = m
             self.has_ultrasonic = True
             self.latest_us_center = m
+            self._publish_fused_clearances()
 
     def _us_center_cb(self, msg: Float32):
         if msg.data > 0.0:
@@ -199,16 +225,19 @@ class VisualWallDetector(Node):
             self.latest_ultrasonic = m
             self.has_ultrasonic = True
             self.latest_us_center = m
+            self._publish_fused_clearances()
 
     def _us_left_cb(self, msg: Float32):
         if msg.data > 0.0:
             val = float(msg.data)
             self.latest_us_left = val / 100.0 if val > 5.0 else val
+            self._publish_fused_clearances()
 
     def _us_right_cb(self, msg: Float32):
         if msg.data > 0.0:
             val = float(msg.data)
             self.latest_us_right = val / 100.0 if val > 5.0 else val
+            self._publish_fused_clearances()
 
     def compressed_image_callback(self, msg: CompressedImage):
         try:
@@ -284,18 +313,14 @@ class VisualWallDetector(Node):
         # ----------------------------------------------------
         # 5. Sensor Fusion: Pessimistic Minimum Envelope for Clearances
         # Combines Camera floor horizon detection with Ultrasonic Time-of-Flight
-        # (Front, Left, and Right sectors)
         # ----------------------------------------------------
+        self.cam_dist_left = dist_left
+        self.cam_dist_front = dist_center
+        self.cam_dist_right = dist_right
+        self._publish_fused_clearances()
+
         center_sensor = self.latest_us_center if self.latest_us_center is not None else (self.latest_ultrasonic if self.has_ultrasonic else None)
         fused_center = float(min(dist_center, center_sensor)) if center_sensor is not None else float(dist_center)
-        fused_left = float(min(dist_left, self.latest_us_left)) if self.latest_us_left is not None else float(dist_left)
-        fused_right = float(min(dist_right, self.latest_us_right)) if self.latest_us_right is not None else float(dist_right)
-
-        obs_msg = Vector3()
-        obs_msg.x = float(fused_center)  # Front clearance (fused)
-        obs_msg.y = float(fused_left)    # Left clearance (fused)
-        obs_msg.z = float(fused_right)   # Right clearance (fused)
-        self.obstacle_pub.publish(obs_msg)
 
         # ----------------------------------------------------
         # 6. Offline Victim / Person Detection (Full Frame)
