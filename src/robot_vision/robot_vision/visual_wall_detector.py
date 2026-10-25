@@ -189,7 +189,6 @@ class VisualWallDetector(Node):
         self.get_logger().info(
             f"VisualWallDetector initialized. Subscribed to '{raw_topic}' & '{comp_topic}', publishing to '{obs_topic}'"
         )
-        )
 
     def _publish_fused_clearances(self):
         center_sensor = self.latest_us_center if self.latest_us_center is not None else (self.latest_ultrasonic if self.has_ultrasonic else None)
