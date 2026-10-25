@@ -1,0 +1,2 @@
+numpy
+opencv-python>=4.7,<5   # OpenCV 5.0 on Windows refuses to open cameras by index

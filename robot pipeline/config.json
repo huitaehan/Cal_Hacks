@@ -1,0 +1,21 @@
+{
+  "comment": "Floor metres, same frame as wifi detection/host/floorplan.json: origin front-left, x to the right as seen from the door, y away from the door. Headings are degrees counter-clockwise from +x, seen from above. \"area\" is where the robots may drive (what the camera sees); people can be found in the whole WiFi area. Sensing boards are fixed by default: if a robot carries its board, rename that robot's \"board_if_carried\" to \"sensing_mac\". Walls come from the WiFi floor plan's \"walls\" (or a \"walls\" list here). \"tracking\": \"colour\" uses the robots' SSL patterns; \"aruco\" uses printed markers.",
+  "tracking": "colour",
+  "camera": {"index": 1, "width": 1920, "height": 1080},
+  "area": [[0.0, 0.0], [1.97, 2.45]],
+  "robots": {
+    "A": {"pattern": {"pink": 2, "green": 2}, "marker": 10, "sentry": [1.255, 0.295], "board_if_carried": "d0:cf:13:e1:63:30"},
+    "B": {"pattern": {"pink": 4}, "marker": 11, "sentry": [0.25, 0.295], "board_if_carried": "d0:cf:13:e1:2e:30"}
+  },
+  "pattern_radius_m": 0.065,
+  "pattern_layout": "ssl",
+  "robot_radius_m": 0.09,
+  "wall_margin_m": 0.04,
+  "mission": {"follow": true, "follow_lost_s": 8, "found_radius_m": 0.4, "found_ignore_s": 30},
+  "drive": {"speed_min": 18, "speed_max": 32, "slow_m": 0.4, "arrive_m": 0.08},
+  "wifi_floorplan": "../wifi detection/host/floorplan.json",
+  "floor_markers": {"0": [0.0, 0.0], "1": [4.5, 0.0], "2": [4.5, 4.0], "3": [0.0, 4.0]},
+  "wifi_server": "http://127.0.0.1:8000",
+  "robot_udp_port": 4210,
+  "hello_udp_port": 4211
+}

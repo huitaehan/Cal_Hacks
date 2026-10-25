@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WiFi Presence Monitor</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f3f3f1;
+    --surface-1: #fcfcfb;
+    --surface-2: #f0efec;
+    --border: #e1e0db;
+    --grid: #e7e6e2;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7c7b76;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --banner-good-bg: #e8f5e8;
+    --banner-warn-bg: #fdf3dc;
+    --banner-crit-bg: #fbe6e6;
+    --banner-idle-bg: #ecebe8;
+    --seq-lo: #cde2fb;
+    --seq-hi: #0d366b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #111110;
+      --surface-1: #1a1a19;
+      --surface-2: #232321;
+      --border: #2f2f2c;
+      --grid: #2a2a28;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8f8e86;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --banner-good-bg: #13261a;
+      --banner-warn-bg: #2b2412;
+      --banner-crit-bg: #321617;
+      --banner-idle-bg: #20201e;
+      --seq-lo: #104281;
+      --seq-hi: #cde2fb;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #111110;
+    --surface-1: #1a1a19;
+    --surface-2: #232321;
+    --border: #2f2f2c;
+    --grid: #2a2a28;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8f8e86;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --banner-good-bg: #13261a;
+    --banner-warn-bg: #2b2412;
+    --banner-crit-bg: #321617;
+    --banner-idle-bg: #20201e;
+    --seq-lo: #104281;
+    --seq-hi: #cde2fb;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 1280px; margin: 0 auto; padding: 16px; }
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
+    margin-bottom: 14px;
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  .live { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  .dot.on { background: var(--good); }
+  .controls { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+  .controls label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 13px; }
+  button, select {
+    font: inherit; font-size: 13px; color: var(--text-primary);
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 10px; cursor: pointer;
+  }
+  button:hover, select:hover { background: var(--surface-2); }
+  input[type=range] { width: 110px; accent-color: var(--series-1); }
+  input[type=checkbox] { accent-color: var(--series-1); }
+
+  .banner {
+    display: flex; align-items: center; gap: 16px;
+    border-radius: 12px; padding: 18px 22px; margin-bottom: 14px;
+    background: var(--banner-idle-bg); border: 1px solid var(--border);
+    transition: background .25s;
+  }
+  .banner .icon { width: 44px; height: 44px; flex: none; }
+  .banner .title { font-size: 28px; font-weight: 700; letter-spacing: .01em; }
+  .banner .sub { color: var(--text-secondary); font-size: 14px; }
+  .banner .conf { margin-left: auto; text-align: right; }
+  .banner .conf .v { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .banner .conf .k { color: var(--text-secondary); font-size: 12px; }
+  .banner.crit { background: var(--banner-crit-bg); border-color: var(--critical); }
+  .banner.good { background: var(--banner-good-bg); }
+  .banner.warn { background: var(--banner-warn-bg); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } .controls { margin-left: 0; } }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px; min-width: 0;
+  }
+  .card h2 { margin: 0 0 2px; font-size: 14px; font-weight: 650; }
+  .card .hint { margin: 0 0 10px; color: var(--text-secondary); font-size: 12px; }
+  .chart-wrap { position: relative; }
+  canvas { display: block; width: 100%; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 0 0 6px; font-size: 12px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+  .legend i.dash { height: 0; border-top: 2px dashed var(--text-muted); width: 16px; }
+
+  .tooltip {
+    position: absolute; pointer-events: none; display: none;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.12);
+    padding: 7px 10px; font-size: 12px; white-space: nowrap; z-index: 5;
+  }
+  .tooltip .row { display: flex; align-items: center; gap: 6px; }
+  .tooltip i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+  .tooltip b { font-variant-numeric: tabular-nums; }
+
+  table.kv { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.kv td { padding: 4px 0; border-bottom: 1px solid var(--grid); }
+  table.kv td:first-child { color: var(--text-secondary); width: 48%; }
+  table.kv td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px;
+    border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--border);
+  }
+  .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .chip.crit { color: var(--critical); }
+  .chip.good { color: var(--good); }
+  .chip.warn { color: var(--warning); }
+  .chip.idle { color: var(--text-muted); }
+  .node-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .node-head i { width: 14px; height: 3px; border-radius: 2px; }
+  .node-head .port { color: var(--text-secondary); font-size: 12px; margin-left: auto; }
+
+  details.card summary { cursor: pointer; font-weight: 650; }
+  pre.log {
+    margin: 10px 0 0; max-height: 260px; overflow: auto; font-size: 12px;
+    color: var(--text-secondary); background: var(--surface-2); border-radius: 8px; padding: 8px 10px;
+  }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>WiFi presence monitor</h1>
+    <span class="live"><span class="dot" id="liveDot"></span><span id="liveText">connecting…</span></span>
+    <div class="controls">
+      <label>Sensitivity <input type="range" id="sens" min="0.25" max="4" step="0.05" value="1"><b id="sensVal">1.00×</b></label>
+      <label><input type="checkbox" id="static"> Detect still person</label>
+      <label>Alarm from
+        <select id="source">
+          <option value="host">host detector</option>
+          <option value="either">host or RuView</option>
+          <option value="ruview">RuView on-device</option>
+        </select>
+      </label>
+      <button id="recal" title="Reset both boards and relearn the room's background activity">Recalibrate</button>
+    </div>
+  </header>
+
+  <section class="banner" id="banner" aria-live="polite">
+    <svg class="icon" id="bannerIcon" viewBox="0 0 24 24" aria-hidden="true"></svg>
+    <div>
+      <div class="title" id="bannerTitle">Waiting for sensors…</div>
+      <div class="sub" id="bannerSub">Connecting to the ESP32-C5 nodes over USB.</div>
+    </div>
+    <div class="conf">
+      <div class="v" id="bannerConf">–</div>
+      <div class="k">confidence</div>
+    </div>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Sensing zone</h2>
+      <p class="hint">Top-down view of the WiFi link between the two boards. With two nodes there is one link, so this shows <em>whether</em> someone is in the zone, not exactly where.</p>
+      <canvas id="field" height="300" aria-label="Sensing zone diagram"></canvas>
+    </section>
+    <section class="card">
+      <h2>Motion score</h2>
+      <p class="hint">CSI amplitude variation on each node's received link, divided by its calibrated threshold. Above 1 = motion detected.</p>
+      <div class="legend" id="scoreLegend"></div>
+      <div class="chart-wrap">
+        <canvas id="score" height="262" aria-label="Motion score over the last 60 seconds"></canvas>
+        <div class="tooltip" id="scoreTip"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="grid" id="waterfalls"></div>
+  <div class="grid" id="nodeCards"></div>
+
+  <details class="card">
+    <summary>Device log</summary>
+    <pre class="log" id="log"></pre>
+  </details>
+</main>
+
+<script>
+(() => {
+  const HISTORY_S = 60;
+  const WF_COLS = 300;            // waterfall columns (10 Hz -> 30 s)
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const SERIES = ["--series-1", "--series-2"];
+
+  let state = null;
+  const scoreHist = [];          // {t, ratios: [..]}
+  const wf = {};                 // port -> {rows: [], nsc}
+  let logLines = [];
+  let lastMsg = 0;
+
+  // ---- helpers ----------------------------------------------------------
+  const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : Number(v).toFixed(d);
+  const nodeLabel = (n, i) => `Node ${String.fromCharCode(65 + i)}`;
+  const macTail = m => m ? m.slice(-5) : "––";
+
+  function sizeCanvas(c) {
+    const dpr = window.devicePixelRatio || 1;
+    // Assigning c.height rewrites the height attribute, so keep the CSS height
+    // separately; re-reading the attribute grows the canvas by dpr every frame.
+    if (!c.dataset.cssHeight) c.dataset.cssHeight = c.getAttribute("height");
+    const w = c.clientWidth, h = parseInt(c.dataset.cssHeight, 10);
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+      c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+      c.style.height = h + "px";
+    }
+    const ctx = c.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w, h };
+  }
+
+  function hexToRgb(h) {
+    const v = parseInt(h.replace("#", ""), 16);
+    return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+  }
+
+  const ICONS = {
+    crit: '<circle cx="12" cy="12" r="11" style="fill:var(--critical)"/><circle cx="12" cy="7.6" r="2.3" fill="#fff"/><path d="M8.2 18.2c0-2.9 1.7-5.1 3.8-5.1s3.8 2.2 3.8 5.1z" fill="#fff"/>',
+    good: '<circle cx="12" cy="12" r="11" style="fill:var(--good)"/><path d="M7 12.3l3.2 3.2L17.2 8.6" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+    warn: '<path d="M12 1.8 23 21.5H1z" style="fill:var(--warning)"/><path d="M12 8.5v6" stroke="#111" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="18" r="1.4" fill="#111"/>',
+    idle: '<circle cx="12" cy="12" r="10" fill="none" style="stroke:var(--text-muted)" stroke-width="2"/><path d="M12 6.5v6l3.5 2" style="stroke:var(--text-muted)" stroke-width="2" fill="none" stroke-linecap="round"/>',
+  };
+
+  // ---- banner -----------------------------------------------------------
+  function renderBanner() {
+    const b = document.getElementById("banner");
+    const title = document.getElementById("bannerTitle");
+    const sub = document.getElementById("bannerSub");
+    const conf = document.getElementById("bannerConf");
+    const icon = document.getElementById("bannerIcon");
+    let kind = "idle";
+    const stale = Date.now() - lastMsg > 2000;
+    if (!state || stale) {
+      title.textContent = "Waiting for sensors…";
+      sub.textContent = stale && state ? "Lost connection to the dashboard server." : "Connecting to the ESP32-C5 nodes over USB.";
+      conf.textContent = "–";
+    } else {
+      const s = state.summary;
+      if (!s.linked) {
+        title.textContent = "No link between nodes";
+        sub.textContent = "Boards are connected but not hearing each other yet. Check both are powered.";
+        conf.textContent = "–";
+      } else if (s.warmup !== null) {
+        kind = "warn";
+        title.textContent = "Step back from the boards";
+        sub.textContent = `Calibration starts in ${Math.ceil(s.warmup)} s. Move ~2 m away until it finishes; people further off are fine.`;
+        conf.textContent = "–";
+      } else if (s.calibrating !== null) {
+        kind = "warn";
+        title.textContent = "Calibrating – stay back from the boards";
+        sub.textContent = `Learning the room's background activity… ${Math.ceil(s.calibrating)} s left. Stay ~2 m away.`;
+        conf.textContent = "–";
+      } else if (s.detected) {
+        kind = "crit";
+        title.textContent = "PERSON DETECTED";
+        const via = [s.host_detected && "host motion detector", s.ruview_detected && "RuView on-device"].filter(Boolean).join(" + ");
+        sub.textContent = `Someone is in the sensing zone · triggered by ${via || "detector"}`;
+        conf.textContent = Math.round(s.confidence * 100) + "%";
+      } else {
+        kind = "good";
+        title.textContent = "No one detected";
+        sub.textContent = "The link is quiet. Walk between or next to the boards to test.";
+        conf.textContent = Math.round(s.confidence * 100) + "%";
+      }
+    }
+    b.className = "banner " + kind;
+    icon.innerHTML = ICONS[kind];
+  }
+
+  // ---- sensing zone -----------------------------------------------------
+  function renderField(tms) {
+    const c = document.getElementById("field");
+    const { ctx, w, h } = sizeCanvas(c);
+    ctx.clearRect(0, 0, w, h);
+    const nodes = state ? state.nodes : [];
+    const ax = w * 0.14, bx = w * 0.86, y = h * 0.5;
+    const muted = css("--text-muted"), sec = css("--text-secondary"), prim = css("--text-primary");
+    const crit = css("--critical"), grid = css("--grid");
+    const s = state && state.summary;
+    const detected = s && s.detected && s.calibrating === null && Date.now() - lastMsg < 2000;
+
+    // floor grid
+    ctx.strokeStyle = grid; ctx.lineWidth = 1;
+    for (let gx = 0; gx <= w; gx += 40) { ctx.beginPath(); ctx.moveTo(gx + .5, 0); ctx.lineTo(gx + .5, h); ctx.stroke(); }
+    for (let gy = 0; gy <= h; gy += 40) { ctx.beginPath(); ctx.moveTo(0, gy + .5); ctx.lineTo(w, gy + .5); ctx.stroke(); }
+
+    // fresnel zone
+    const rx = (bx - ax) / 2, ry = h * 0.2, cx = (ax + bx) / 2;
+    ctx.beginPath(); ctx.ellipse(cx, y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = detected ? hexA(crit, 0.10) : hexA(css("--series-1"), 0.07);
+    ctx.fill();
+    ctx.setLineDash([5, 5]); ctx.strokeStyle = detected ? crit : muted; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
+
+    // link line with moving packets
+    const linked = s && s.linked;
+    ctx.strokeStyle = linked ? sec : muted; ctx.lineWidth = 2;
+    ctx.setLineDash(linked ? [] : [3, 6]);
+    ctx.beginPath(); ctx.moveTo(ax, y); ctx.lineTo(bx, y); ctx.stroke(); ctx.setLineDash([]);
+    if (linked) {
+      const phase = (tms / 1200) % 1;
+      for (let k = 0; k < 4; k++) {
+        const f = (phase + k / 4) % 1;
+        ctx.fillStyle = css(SERIES[0]);
+        ctx.beginPath(); ctx.arc(ax + (bx - ax) * f, y - 4, 2.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = css(SERIES[1]);
+        ctx.beginPath(); ctx.arc(bx - (bx - ax) * f, y + 4, 2.5, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // nodes
+    [ax, bx].forEach((x, i) => {
+      const n = nodes[i];
+      ctx.fillStyle = css("--surface-1");
+      ctx.strokeStyle = css(SERIES[i]); ctx.lineWidth = 2.5;
+      roundRect(ctx, x - 20, y - 20, 40, 40, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = prim; ctx.font = "600 13px system-ui"; ctx.textAlign = "center";
+      ctx.fillText(String.fromCharCode(65 + i), x, y + 5);
+      ctx.fillStyle = sec; ctx.font = "12px system-ui";
+      ctx.fillText(n ? `${n.port} · ${macTail(n.mac)}` : "–", x, y + 38);
+      const e = n && n.edge;
+      let txt = "RuView: –", col = muted;
+      if (e && !e.stale) {
+        if (!e.calibrated) { txt = "RuView: calibrating"; col = css("--warning"); }
+        else if (e.presence) { txt = "RuView: presence"; col = crit; }
+        else { txt = "RuView: clear"; col = css("--good"); }
+      }
+      ctx.fillStyle = col; ctx.font = "600 12px system-ui";
+      ctx.fillText(txt, x, y + 54);
+    });
+
+    // person + bounding box
+    if (detected) {
+      const conf = Math.max(0.5, s.confidence);
+      const pulse = 1 + 0.04 * Math.sin(tms / 160);
+      const bh = Math.min(h * 0.62, 120 + 60 * conf) * pulse, bw = bh * 0.62;
+      const px = cx, py = y - 6;
+      // silhouette
+      ctx.fillStyle = hexA(crit, 0.85);
+      ctx.beginPath(); ctx.arc(px, py - bh * 0.28, bh * 0.11, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(px - bh * 0.17, py + bh * 0.36);
+      ctx.quadraticCurveTo(px - bh * 0.2, py - bh * 0.13, px, py - bh * 0.14);
+      ctx.quadraticCurveTo(px + bh * 0.2, py - bh * 0.13, px + bh * 0.17, py + bh * 0.36);
+      ctx.closePath(); ctx.fill();
+      // box
+      ctx.strokeStyle = crit; ctx.lineWidth = 2.5; ctx.setLineDash([8, 5]);
+      ctx.strokeRect(px - bw / 2, py - bh / 2, bw, bh); ctx.setLineDash([]);
+      // corner ticks
+      ctx.lineWidth = 4;
+      const L = 12, x0 = px - bw / 2, y0 = py - bh / 2, x1 = px + bw / 2, y1 = py + bh / 2;
+      [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]].forEach(([qx, qy, dx, dy]) => {
+        ctx.beginPath(); ctx.moveTo(qx + dx * L, qy); ctx.lineTo(qx, qy); ctx.lineTo(qx, qy + dy * L); ctx.stroke();
+      });
+      // label tab
+      const label = `PERSON ${Math.round(s.confidence * 100)}%`;
+      ctx.font = "700 12px system-ui";
+      const tw = ctx.measureText(label).width + 14;
+      ctx.fillStyle = crit; roundRect(ctx, x0, y0 - 22, tw, 20, 4); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.fillText(label, x0 + 7, y0 - 8);
+    } else {
+      ctx.fillStyle = sec; ctx.font = "13px system-ui"; ctx.textAlign = "center";
+      let msg = "waiting for link";
+      if (s && s.linked) msg = s.calibrating !== null ? "calibrating…" : "zone clear";
+      ctx.fillText(msg, cx, y - ry - 10);
+    }
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function hexA(hex, a) { const [r, g, b] = hexToRgb(hex); return `rgba(${r},${g},${b},${a})`; }
+
+  // ---- motion score chart ----------------------------------------------
+  const scoreGeom = { padL: 40, padR: 70, padT: 8, padB: 26 };
+  let scoreHover = null;
+
+  function renderScore() {
+    const c = document.getElementById("score");
+    const { ctx, w, h } = sizeCanvas(c);
+    ctx.clearRect(0, 0, w, h);
+    const { padL, padR, padT, padB } = scoreGeom;
+    const pw = w - padL - padR, ph = h - padT - padB;
+    const now = state ? state.t : Date.now() / 1000;
+    const nodes = state ? state.nodes : [];
+
+    let ymax = 3;
+    for (const p of scoreHist) for (const r of p.ratios) if (r !== null && r > ymax) ymax = r;
+    ymax = Math.min(Math.ceil(ymax), 15);
+    const X = t => padL + pw * (1 - (now - t) / HISTORY_S);
+    const Y = v => padT + ph * (1 - Math.min(v, ymax) / ymax);
+
+    // grid + y axis
+    ctx.font = "11px system-ui"; ctx.fillStyle = css("--text-muted"); ctx.textAlign = "right";
+    const step = ymax <= 4 ? 1 : ymax <= 8 ? 2 : 5;
+    ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+    for (let v = 0; v <= ymax; v += step) {
+      const yy = Math.round(Y(v)) + .5;
+      ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(padL + pw, yy); ctx.stroke();
+      ctx.fillText(v + "×", padL - 6, yy + 4);
+    }
+    ctx.textAlign = "center";
+    for (let s = 0; s <= HISTORY_S; s += 15) {
+      ctx.fillText(s === 0 ? "now" : `−${s}s`, X(now - s), h - 8);
+    }
+    // threshold
+    ctx.strokeStyle = css("--text-muted"); ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(padL, Y(1)); ctx.lineTo(padL + pw, Y(1)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = css("--text-secondary"); ctx.textAlign = "left"; ctx.font = "11px system-ui";
+    ctx.fillText("threshold", padL + 4, Y(1) - 5);
+
+    // series
+    const labels = [];
+    nodes.forEach((n, i) => {
+      ctx.strokeStyle = css(SERIES[i % 2]); ctx.lineWidth = 2; ctx.lineJoin = "round";
+      ctx.beginPath(); let pen = false, last = null;
+      for (const p of scoreHist) {
+        const r = p.ratios[i];
+        if (r === null || r === undefined) { pen = false; continue; }
+        const xx = X(p.t), yy = Y(r);
+        if (!pen) { ctx.moveTo(xx, yy); pen = true; } else ctx.lineTo(xx, yy);
+        last = { xx, yy, r };
+      }
+      ctx.stroke();
+      if (last) labels.push({ y: last.yy, text: `${nodeLabel(n, i)} ${fmt(last.r, 1)}×`, i });
+    });
+    // direct labels at the line ends, nudged apart
+    labels.sort((a, b) => a.y - b.y);
+    for (let k = 1; k < labels.length; k++) if (labels[k].y - labels[k - 1].y < 14) labels[k].y = labels[k - 1].y + 14;
+    ctx.font = "600 11px system-ui"; ctx.textAlign = "left"; ctx.fillStyle = css("--text-primary");
+    labels.forEach(l => ctx.fillText(l.text, padL + pw + 6, Math.min(Math.max(l.y + 4, padT + 8), padT + ph)));
+
+    if (!state || nodes.every(n => n.detector.threshold === null)) {
+      ctx.fillStyle = css("--text-secondary"); ctx.font = "13px system-ui"; ctx.textAlign = "center";
+      ctx.fillText("Score appears after calibration", padL + pw / 2, padT + ph / 2);
+    }
+
+    // hover crosshair
+    const tip = document.getElementById("scoreTip");
+    if (scoreHover && scoreHist.length) {
+      const tAt = now - (1 - (scoreHover.x - padL) / pw) * HISTORY_S;
+      let best = null;
+      for (const p of scoreHist) if (!best || Math.abs(p.t - tAt) < Math.abs(best.t - tAt)) best = p;
+      if (best && scoreHover.x >= padL && scoreHover.x <= padL + pw) {
+        const xx = X(best.t);
+        ctx.strokeStyle = css("--text-muted"); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(xx + .5, padT); ctx.lineTo(xx + .5, padT + ph); ctx.stroke();
+        let html = `<div style="color:var(--text-secondary);margin-bottom:3px">${(now - best.t).toFixed(1)} s ago</div>`;
+        nodes.forEach((n, i) => {
+          const r = best.ratios[i];
+          if (r !== null && r !== undefined) {
+            ctx.fillStyle = css(SERIES[i % 2]); ctx.strokeStyle = css("--surface-1"); ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(xx, Y(r), 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          }
+          html += `<div class="row"><i style="background:var(${SERIES[i % 2]})"></i>${nodeLabel(n, i)} <b>${fmt(r, 2)}×</b></div>`;
+        });
+        tip.innerHTML = html; tip.style.display = "block";
+        const left = Math.min(xx + 12, w - 150);
+        tip.style.left = left + "px"; tip.style.top = (padT + 6) + "px";
+      } else tip.style.display = "none";
+    } else tip.style.display = "none";
+  }
+
+  const scoreCanvas = document.getElementById("score");
+  scoreCanvas.addEventListener("mousemove", e => {
+    const r = scoreCanvas.getBoundingClientRect(); scoreHover = { x: e.clientX - r.left };
+  });
+  scoreCanvas.addEventListener("mouseleave", () => { scoreHover = null; });
+
+  // ---- waterfalls -------------------------------------------------------
+  function ensureWaterfalls(nodes) {
+    const host = document.getElementById("waterfalls");
+    if (host.children.length === nodes.length) return;
+    host.innerHTML = "";
+    nodes.forEach((n, i) => {
+      const card = document.createElement("section");
+      card.className = "card";
+      card.innerHTML = `
+        <h2>${nodeLabel(n, i)} · CSI waterfall</h2>
+        <p class="hint">Normalised amplitude per subcarrier (rows) over the last 30 s. Steady stripes = still room; ripples = motion.</p>
+        <div class="chart-wrap">
+          <canvas height="170" data-port="${n.port}"></canvas>
+          <div class="tooltip"></div>
+        </div>
+        <div class="legend" style="margin-top:6px"><span>low</span><span style="flex:1;max-width:160px;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--seq-lo),var(--seq-hi))"></span><span>high amplitude</span></div>`;
+      host.appendChild(card);
+      const cv = card.querySelector("canvas"), tip = card.querySelector(".tooltip");
+      cv.addEventListener("mousemove", e => {
+        const w = wf[n.port]; if (!w || !w.rows.length) return;
+        const r = cv.getBoundingClientRect();
+        const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+        const col = Math.floor(fx * WF_COLS) - (WF_COLS - w.rows.length);
+        const row = w.rows[col];
+        if (!row) { tip.style.display = "none"; return; }
+        const sc = Math.min(row.length - 1, Math.floor(fy * row.length));
+        const ago = ((w.rows.length - 1 - col) / 10).toFixed(1);
+        tip.innerHTML = `subcarrier <b>${sc - Math.floor(row.length / 2)}</b> · ${ago} s ago<br>amplitude <b>${fmt(row[sc], 2)}</b>× mean`;
+        tip.style.display = "block";
+        tip.style.left = Math.min(e.clientX - r.left + 12, r.width - 170) + "px";
+        tip.style.top = Math.max(e.clientY - r.top - 40, 0) + "px";
+      });
+      cv.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+    });
+  }
+
+  function renderWaterfalls() {
+    const lo = hexToRgb(css("--seq-lo")), hi = hexToRgb(css("--seq-hi"));
+    document.querySelectorAll("#waterfalls canvas").forEach(cv => {
+      const w = wf[cv.dataset.port];
+      const { ctx, w: cw, h: ch } = sizeCanvas(cv);
+      ctx.fillStyle = css("--surface-2"); ctx.fillRect(0, 0, cw, ch);
+      if (!w || !w.rows.length) return;
+      const nsc = w.rows[w.rows.length - 1].length;
+      const img = ctx.createImageData(WF_COLS, nsc);
+      const off = WF_COLS - w.rows.length;
+      for (let x = 0; x < w.rows.length; x++) {
+        const row = w.rows[x];
+        if (row.length !== nsc) continue;
+        for (let y = 0; y < nsc; y++) {
+          const v = row[y];
+          const p = ((y * WF_COLS) + x + off) * 4;
+          if (v <= 0) { img.data[p + 3] = 0; continue; }
+          const f = Math.max(0, Math.min(1, (v - 0.3) / 1.4));
+          img.data[p] = lo[0] + (hi[0] - lo[0]) * f;
+          img.data[p + 1] = lo[1] + (hi[1] - lo[1]) * f;
+          img.data[p + 2] = lo[2] + (hi[2] - lo[2]) * f;
+          img.data[p + 3] = 255;
+        }
+      }
+      const tmp = document.createElement("canvas"); tmp.width = WF_COLS; tmp.height = nsc;
+      tmp.getContext("2d").putImageData(img, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(tmp, 0, 0, cw, ch);
+    });
+  }
+
+  // ---- node cards -------------------------------------------------------
+  function chip(kind, text) { return `<span class="chip ${kind}">${text}</span>`; }
+
+  function renderCards() {
+    const host = document.getElementById("nodeCards");
+    if (!state) return;
+    if (host.children.length !== state.nodes.length) {
+      host.innerHTML = state.nodes.map(() => `<section class="card"></section>`).join("");
+    }
+    state.nodes.forEach((n, i) => {
+      const d = n.detector, e = n.edge;
+      let hostChip = chip("idle", "no data");
+      if (n.csi_rate > 0) {
+        if (!d.calibrated) hostChip = chip("warn", `calibrating ${Math.ceil(d.calib_left || 0)} s`);
+        else if (d.detected) hostChip = chip("crit", "motion");
+        else hostChip = chip("good", "clear");
+      }
+      let edgeChip = chip("idle", "no data");
+      if (e && !e.stale) {
+        if (!e.calibrated) edgeChip = chip("warn", `calibrating ~${Math.max(0, Math.ceil(e.calib_s - e.uptime_s))} s`);
+        else edgeChip = e.presence ? chip("crit", "presence") : chip("good", "clear");
+      }
+      const staticChip = !d.calibrated ? "–" : d.static_detected ? chip("warn", "shifted") : chip("good", "at baseline");
+      host.children[i].innerHTML = `
+        <div class="node-head"><i style="background:var(${SERIES[i % 2]})"></i><h2>${nodeLabel(n, i)}</h2>
+          <span class="port">${n.port} · ${n.mac || "–"} ${n.connected ? "" : "· disconnected"}</span></div>
+        <table class="kv">
+          <tr><td>Hearing peer</td><td>${n.peer || "–"}</td></tr>
+          <tr><td>CSI frames / s</td><td>${fmt(n.csi_rate, 1)}</td></tr>
+          <tr><td>RSSI</td><td>${n.rssi === null ? "–" : fmt(n.rssi, 0) + " dBm"}</td></tr>
+          <tr><td>Host motion detector</td><td>${hostChip}</td></tr>
+          <tr><td>Motion score / threshold</td><td>${fmt(d.motion, 4)} / ${fmt(d.threshold, 4)}</td></tr>
+          <tr><td>Still-person shift, experimental (${fmt(d.static_dev, 3)} / ${fmt(d.static_threshold, 3)})</td><td>${staticChip}</td></tr>
+          <tr><td>RuView on-device presence</td><td>${edgeChip}</td></tr>
+          <tr><td>RuView motion energy / threshold</td><td>${e ? fmt(e.motion_energy, 2) : "–"} / ${e && e.calibration ? fmt(e.calibration.threshold, 2) : "–"}</td></tr>
+          <tr><td>RuView DSP rate</td><td>${e ? fmt(e.dsp_hz, 1) + " Hz" : "–"}</td></tr>
+        </table>`;
+    });
+  }
+
+  function renderLegend() {
+    if (!state) return;
+    document.getElementById("scoreLegend").innerHTML =
+      state.nodes.map((n, i) => `<span><i style="background:var(${SERIES[i % 2]})"></i>${nodeLabel(n, i)} (${n.port})</span>`).join("") +
+      `<span><i class="dash"></i>threshold</span>`;
+  }
+
+  // ---- data -------------------------------------------------------------
+  function onState(st) {
+    state = st; lastMsg = Date.now();
+    scoreHist.push({ t: st.t, ratios: st.nodes.map(n => n.detector.ratio) });
+    while (scoreHist.length && scoreHist[0].t < st.t - HISTORY_S - 1) scoreHist.shift();
+    ensureWaterfalls(st.nodes);
+    st.nodes.forEach(n => {
+      const w = wf[n.port] || (wf[n.port] = { rows: [] });
+      if (n.row) { w.rows.push(n.row); if (w.rows.length > WF_COLS) w.rows.shift(); }
+      for (const l of n.logs) logLines.push(`[${n.port}] ${l.text}`);
+    });
+    if (logLines.length > 400) logLines = logLines.slice(-400);
+    const logEl = document.getElementById("log");
+    const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8;
+    logEl.textContent = logLines.join("\n");
+    if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+    syncControls(st.settings);
+    renderLegend(); renderCards(); renderWaterfalls();
+    document.getElementById("liveDot").className = "dot on";
+    document.getElementById("liveText").textContent = `live · ${st.nodes.filter(n => n.connected).length}/${st.nodes.length} nodes`;
+  }
+
+  let controlsSynced = false;
+  function syncControls(s) {
+    if (controlsSynced) return;
+    controlsSynced = true;
+    document.getElementById("sens").value = s.sensitivity;
+    document.getElementById("sensVal").textContent = Number(s.sensitivity).toFixed(2) + "×";
+    document.getElementById("static").checked = s.include_static;
+    document.getElementById("source").value = s.banner_source;
+  }
+
+  const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  document.getElementById("sens").addEventListener("input", e => {
+    document.getElementById("sensVal").textContent = Number(e.target.value).toFixed(2) + "×";
+    post("/api/settings", { sensitivity: Number(e.target.value) });
+  });
+  document.getElementById("static").addEventListener("change", e => post("/api/settings", { include_static: e.target.checked }));
+  document.getElementById("source").addEventListener("change", e => post("/api/settings", { banner_source: e.target.value }));
+  document.getElementById("recal").addEventListener("click", () => {
+    post("/api/recalibrate", { reset_boards: true });
+    scoreHist.length = 0;
+  });
+
+  function connect() {
+    const es = new EventSource("/events");
+    es.onmessage = ev => onState(JSON.parse(ev.data));
+    es.onerror = () => {
+      document.getElementById("liveDot").className = "dot";
+      document.getElementById("liveText").textContent = "reconnecting…";
+    };
+  }
+  connect();
+
+  function frame(tms) {
+    renderBanner(); renderField(tms); renderScore();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  window.addEventListener("resize", renderWaterfalls);
+})();
+</script>
+</body>
+</html>

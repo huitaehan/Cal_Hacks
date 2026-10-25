@@ -1,0 +1,12 @@
+[Unit]
+Description=Rescue robot @ROBOT@ motor controller (drive commands on UDP 4210, HELLO on 4211)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 -u /opt/robot/pi_robot.py @ROBOT@
+WorkingDirectory=/opt/robot
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

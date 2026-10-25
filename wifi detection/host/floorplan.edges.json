@@ -1,0 +1,17 @@
+{
+  "comment": "Taped zone 1.51 x 1.375 m (from setup_camera.py). Origin = front-left tape corner (laptop side); x to the right, y away from the laptop. Fixed boards at waist height, 25 cm outside the middle of each taped edge; the front one (2e:30) is the gateway on the laptop's USB. Walls: none yet. The old open 4.5 x 4.0 m plan is floorplan.open45.json; the two-room house is floorplan.house.json.",
+  "rooms": [
+    {"name": "Search area", "polygon": [[0, 0], [1.51, 0], [1.51, 1.375], [0, 1.375]]}
+  ],
+  "boards": {
+    "d0:cf:13:e1:2e:30": [0.755, -0.25],
+    "d0:cf:13:e1:66:2c": [0.755, 1.625],
+    "d0:cf:13:e1:63:30": [1.76, 0.69],
+    "d0:cf:13:e1:63:ac": [-0.25, 0.69]
+  },
+  "walls": [],
+  "motion_half_life_s": 8,
+  "stops": [
+    {"name": "Search area", "a": [1.255, 0.295], "b": [0.25, 0.295], "listen_s": 15}
+  ]
+}

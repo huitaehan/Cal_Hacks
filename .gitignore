@@ -1,10 +1,22 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.venv/
+
+# ROS 2 & Build Artifacts
 build/
 install/
 log/
 .vscode/
+
+# OS Artifacts
 .DS_Store
 __MACOSX/
+
+# Raw WiFi recordings: they reach hundreds of MB (GitHub refuses files over 100 MB).
+wifi detection/host/recordings/*.log
+
+# Run output
+robot pipeline/mission_log.txt

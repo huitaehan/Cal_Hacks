@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WiFi Presence 3D</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0e12;
+    --panel: rgba(20, 24, 30, 0.86);
+    --border: #2a313b;
+    --text-primary: #eef0f2;
+    --text-secondary: #aab2bd;
+    --text-muted: #7d8590;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --link-quiet: #3987e5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text-primary);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  #scene { position: fixed; inset: 0; }
+  .panel { position: fixed; background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; backdrop-filter: blur(6px); }
+  #status { top: 16px; left: 16px; min-width: 300px; }
+  #status h1 { margin: 0 0 6px; font-size: 15px; font-weight: 650; }
+  #status h1 a { color: var(--text-secondary); font-weight: 400; font-size: 12px; margin-left: 8px; }
+  .state { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 700; }
+  .state .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--text-muted); flex: none; }
+  .state.crit .dot { background: var(--critical); box-shadow: 0 0 12px var(--critical); }
+  .state.good .dot { background: var(--good); }
+  .state.warn .dot { background: var(--warning); }
+  .sub { color: var(--text-secondary); font-size: 13px; margin-top: 4px; }
+  #boards { bottom: 16px; left: 16px; max-width: 360px; }
+  #boards h2, #legend h2 { margin: 0 0 6px; font-size: 12px; font-weight: 650; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: .06em; }
+  table { border-collapse: collapse; font-size: 12px; width: 100%; }
+  td { padding: 2px 6px 2px 0; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  td:first-child { color: var(--text-primary); font-family: ui-monospace, Consolas, monospace; }
+  .usb { color: #0b0e12; background: var(--text-secondary); border-radius: 4px; padding: 0 4px; font-size: 10px;
+    font-weight: 700; margin-left: 4px; }
+  #boards .note { color: var(--text-muted); font-size: 11px; margin-top: 6px; }
+  #legend { bottom: 16px; right: 16px; width: 270px; font-size: 12px; color: var(--text-secondary); }
+  #legend .row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  #legend i { display: inline-block; width: 22px; height: 4px; border-radius: 2px; flex: none; }
+  #legend .heat { height: 8px; background: linear-gradient(90deg, rgba(208,59,59,0), rgba(208,59,59,1)); }
+  .label { color: var(--text-primary); font: 600 12px system-ui, sans-serif; background: rgba(11,14,18,.75);
+    border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; white-space: nowrap; pointer-events: none; }
+  .label.person { background: var(--critical); border-color: var(--critical); color: #fff; }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+
+<section class="panel" id="status">
+  <h1>WiFi presence · 3D <a href="/">2D dashboard</a></h1>
+  <div class="state" id="state"><span class="dot"></span><span id="stateText">Connecting…</span></div>
+  <div class="sub" id="stateSub">Waiting for live data.</div>
+</section>
+
+<section class="panel" id="boards">
+  <h2>Boards</h2>
+  <table id="boardTable"></table>
+  <div class="note" id="boardNote">Positions (metres) come from <b>host/layout.json</b>. Edit it to match where each board
+    really is; the view updates within a second.</div>
+</section>
+
+<section class="panel" id="legend">
+  <h2>How to read this</h2>
+  <div class="row"><i style="background:var(--link-quiet)"></i>quiet link between two boards</div>
+  <div class="row"><i style="background:var(--critical)"></i>link disturbed by motion (brighter = stronger)</div>
+  <div class="row"><i class="heat"></i>where the disturbed links agree</div>
+  <div class="row" style="margin-top:6px;color:var(--text-muted)">The red marker on the floor is the estimated
+    position, shown only while motion is detected. It's a rough estimate (tens of cm), not a pose.</div>
+</section>
+
+<script type="importmap">
+{ "imports": {
+    "three": "/static/vendor/three/three.module.js",
+    "three/addons/": "/static/vendor/three/addons/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+const BOARD_Y = 0.75;                 // boards drawn at table height (m)
+const C = {
+  quiet: new THREE.Color('#3987e5'), hot: new THREE.Color('#d03b3b'),
+  board: new THREE.Color('#c9d1d9'), ledOn: new THREE.Color('#0ca30c'), ledOff: new THREE.Color('#4a5059'),
+};
+
+// ---- renderer / scene ----------------------------------------------------
+const host = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio || 1);
+renderer.setSize(window.innerWidth, window.innerHeight);
+host.appendChild(renderer.domElement);
+const labels = new CSS2DRenderer();
+labels.setSize(window.innerWidth, window.innerHeight);
+labels.domElement.style.position = 'fixed';
+labels.domElement.style.inset = '0';
+labels.domElement.style.pointerEvents = 'none';
+host.appendChild(labels.domElement);
+
+const scene = new THREE.Scene();
+// Objects are placed at (x, 0, y), which is a mirror image of the floor plan seen from above.
+// Flipping z undoes it (three.js swaps face winding for mirrored objects), so the default
+// camera looks in from the door side with x to the right, as people stand at the station.
+scene.scale.z = -1;
+scene.background = new THREE.Color('#0b0e12');
+scene.fog = new THREE.Fog('#0b0e12', 12, 30);
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.05, 100);
+camera.position.set(4.5, 5, 6.5);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0, 0.6, 0);
+controls.maxPolarAngle = Math.PI * 0.49;
+
+scene.add(new THREE.HemisphereLight('#bcd3ff', '#1a1d22', 0.9));
+const sun = new THREE.DirectionalLight('#ffffff', 0.8);
+sun.position.set(3, 8, 4);
+scene.add(sun);
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: '#12161c', roughness: 1 }));
+floor.rotation.x = -Math.PI / 2;
+scene.add(floor);
+const grid = new THREE.GridHelper(40, 80, '#2a313b', '#1a1f26');
+grid.position.y = 0.001;
+scene.add(grid);
+
+// ---- heatmap ---------------------------------------------------------------
+let heat = null;
+function updateHeat(g, center) {
+  if (!g) { if (heat) heat.visible = false; return; }
+  const key = `${g.nx}x${g.ny}@${g.x0},${g.y0}`;
+  if (!heat || heat.userData.key !== key) {
+    if (heat) { scene.remove(heat); heat.geometry.dispose(); heat.material.map.dispose(); heat.material.dispose(); }
+    const data = new Uint8Array(g.nx * g.ny * 4);
+    const tex = new THREE.DataTexture(data, g.nx, g.ny, THREE.RGBAFormat);
+    tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter;
+    const w = g.nx * g.step, h = g.ny * g.step;
+    heat = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+    heat.rotation.x = -Math.PI / 2;
+    heat.userData.key = key;
+    scene.add(heat);
+  }
+  heat.visible = true;
+  // Grid origin is the cell centre at (x0, y0); place the plane centre accordingly.
+  heat.position.set(g.x0 + (g.nx - 1) * g.step / 2 - center[0], 0.01, g.y0 + (g.ny - 1) * g.step / 2 - center[1]);
+  const d = heat.material.map.image.data;
+  for (let i = 0; i < g.values.length; i++) {
+    const v = g.values[i];
+    d[i * 4] = 208; d[i * 4 + 1] = 59; d[i * 4 + 2] = 59;
+    d[i * 4 + 3] = Math.round(Math.min(1, v) * 200);
+  }
+  heat.material.map.needsUpdate = true;
+}
+
+// ---- boards ------------------------------------------------------------------
+const boards = new Map();   // mac -> {group, led, label}
+function makeLabel(text, cls = 'label') {
+  const el = document.createElement('div');
+  el.className = cls; el.textContent = text;
+  return new CSS2DObject(el);
+}
+function ensureBoard(mac) {
+  if (boards.has(mac)) return boards.get(mac);
+  const group = new THREE.Group();
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, BOARD_Y, 8),
+    new THREE.MeshStandardMaterial({ color: '#39414c' }));
+  post.position.y = BOARD_Y / 2;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.03, 0.1),
+    new THREE.MeshStandardMaterial({ color: C.board, roughness: 0.5 }));
+  body.position.y = BOARD_Y;
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 8), new THREE.MeshBasicMaterial({ color: C.ledOff }));
+  led.position.set(0.06, BOARD_Y + 0.03, 0);
+  const label = makeLabel(mac.slice(-5));
+  label.position.set(0, BOARD_Y + 0.22, 0);
+  group.add(post, body, led, label);
+  scene.add(group);
+  const b = { group, led, label };
+  boards.set(mac, b);
+  return b;
+}
+
+// ---- links -------------------------------------------------------------------
+const links = new Map();    // "a|b" -> {mesh}
+const UP = new THREE.Vector3(0, 1, 0);
+function ensureLink(key) {
+  if (links.has(key)) return links.get(key);
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 10, 1, true),
+    new THREE.MeshBasicMaterial({ color: C.quiet, transparent: true, opacity: 0.35, depthWrite: false }));
+  scene.add(mesh);
+  const l = { mesh, ratio: 0 };
+  links.set(key, l);
+  return l;
+}
+const ROBOT_BOARD_Y = 0.15;           // sensing board on top of a robot
+function placeLink(l, a, b, ya = BOARD_Y, yb = BOARD_Y) {
+  const pa = new THREE.Vector3(a[0], ya, a[1]), pb = new THREE.Vector3(b[0], yb, b[1]);
+  const len = pa.distanceTo(pb);
+  l.mesh.visible = len > 0.05;
+  l.mesh.position.copy(pa).add(pb).multiplyScalar(0.5);
+  l.mesh.quaternion.setFromUnitVectors(UP, pb.clone().sub(pa).normalize());
+  l.len = len;
+}
+
+// ---- person marker -------------------------------------------------------------
+// A flat marker on the floor at the multi-link x,y estimate, shown only while a link
+// currently detects motion (the estimate is a position, not a measured body or pose).
+function makeMarker() {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: '#d03b3b', transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.1, 32), mat);
+  dot.rotation.x = -Math.PI / 2; dot.position.y = 0.03;
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.24, 48), mat);
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03;
+  const label = makeLabel('PERSON', 'label person');
+  label.position.set(0, 0.35, 0);
+  group.add(dot, ring, label);
+  scene.add(group);
+  const p = { group, label, ring, target: new THREE.Vector3() };
+  showPerson(p, false);
+  return p;
+}
+function showPerson(p, on) {
+  p.group.visible = on;
+  p.label.visible = on;   // CSS2D labels ignore their parent's visibility
+}
+const person = makeMarker();
+const MARKER_HOLD_MS = 1000;
+let markerSeen = -Infinity, markerAt = null;   // last time and place motion was detected
+
+// ---- floor plan mode -----------------------------------------------------------
+// Semi-transparent so robots and people inside rooms stay visible from any angle.
+const CARDBOARD = new THREE.MeshStandardMaterial({ color: '#b08d5a', roughness: 0.9, transparent: true,
+  opacity: 0.45, depthWrite: false, side: THREE.DoubleSide });
+const ROOM_COLOR = { occupied: new THREE.Color('#d03b3b'), empty: new THREE.Color('#0ca30c'),
+                     unknown: new THREE.Color('#5a6270') };
+const planGroup = new THREE.Group();
+scene.add(planGroup);
+let planKey = null;
+const rooms = new Map();              // name -> {mesh, label, c: [x, z], poly}
+
+function planCenter(fp) {
+  const xs = [], ys = [];
+  for (const r of fp.rooms) for (const p of r.polygon) { xs.push(p[0]); ys.push(p[1]); }
+  return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+}
+function insidePoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function buildPlan(fp, center) {
+  const key = JSON.stringify([fp.rooms, fp.walls, center]);
+  if (key === planKey) return;
+  planKey = key;
+  for (const r of rooms.values()) r.label.element.remove();
+  planGroup.clear();
+  rooms.clear();
+  for (const [a, b] of fp.walls) {
+    const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(len, 1.0, 0.03), CARDBOARD);
+    wall.position.set((a[0] + b[0]) / 2 - center[0], 0.5, (a[1] + b[1]) / 2 - center[1]);
+    wall.rotation.y = -Math.atan2(dy, dx);
+    planGroup.add(wall);
+  }
+  for (const r of fp.rooms) {
+    // Shape lives in XY; rotating -90° about X maps its y to world -z, so flip y here.
+    const shape = new THREE.Shape(r.polygon.map(p => new THREE.Vector2(p[0] - center[0], -(p[1] - center[1]))));
+    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape),
+      new THREE.MeshBasicMaterial({ color: ROOM_COLOR.unknown, transparent: true, opacity: 0.35, depthWrite: false }));
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = 0.006;
+    const cx = r.polygon.reduce((s, p) => s + p[0], 0) / r.polygon.length;
+    const cy = r.polygon.reduce((s, p) => s + p[1], 0) / r.polygon.length;
+    const label = makeLabel(r.name);
+    label.position.set(cx - center[0], 1.3, cy - center[1]);
+    planGroup.add(mesh, label);
+    rooms.set(r.name, { mesh, label, c: [cx - center[0], cy - center[1]], poly: r.polygon });
+  }
+}
+
+// ---- robots --------------------------------------------------------------------
+const robots = new Map();             // id -> {group, ring, label, target}
+function ensureRobot(id) {
+  if (robots.has(id)) return robots.get(id);
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.07, 24),
+    new THREE.MeshStandardMaterial({ color: '#dfe4ea', roughness: 0.4 }));
+  body.position.y = 0.09;
+  group.add(body);
+  for (let k = 0; k < 3; k++) {       // omni wheels at 120°
+    const a = k * 2 * Math.PI / 3;
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.03, 16),
+      new THREE.MeshStandardMaterial({ color: '#2b3138' }));
+    wheel.rotation.z = Math.PI / 2;
+    wheel.rotation.y = a;
+    wheel.position.set(Math.cos(a) * 0.15, 0.045, Math.sin(a) * 0.15);
+    group.add(wheel);
+  }
+  const board = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.02, 0.05),
+    new THREE.MeshStandardMaterial({ color: '#1f6f43' }));
+  board.position.y = 0.135;
+  group.add(board);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.25, 40),
+    new THREE.MeshBasicMaterial({ color: '#3987e5', transparent: true, opacity: 0.8, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01;
+  const label = makeLabel(`Robot ${id}`);
+  label.position.set(0, 0.45, 0);
+  group.add(ring, label);
+  scene.add(group);
+  const r = { group, ring, label, target: new THREE.Vector3(), placed: false };
+  robots.set(id, r);
+  return r;
+}
+
+// ---- data --------------------------------------------------------------------
+let state = null, lastMsg = 0, framed = false;
+const es = new EventSource('/events');
+es.onmessage = (ev) => { state = JSON.parse(ev.data); lastMsg = performance.now(); apply(state); };
+
+function apply(st) {
+  const loc = st.localization || {};
+  const pos = loc.positions || {};
+  const fp = st.floorplan;
+  const scan = st.scan || { rooms: [], robots: [], detections: [] };
+  const center = fp ? planCenter(fp) : (loc.center || [0, 0]);
+  const usb = new Set(st.nodes.map(n => n.mac).filter(Boolean));
+  const liveMacs = new Set();
+  for (const l of st.links || []) { liveMacs.add(l.tx); liveMacs.add(l.rx); }
+  const robotMacs = new Set(scan.robots.map(r => r.mac));
+
+  // A link is detecting motion right now and the links agree on a position.
+  const live = Boolean(st.summary.detected && loc.person);
+
+  // floor plan and room status (rooms remember motion for a while; the marker is live)
+  if (fp) {
+    buildPlan(fp, center);
+    for (const r of scan.rooms) {
+      const room = rooms.get(r.name);
+      if (!room) continue;
+      room.mesh.material.color.copy(ROOM_COLOR[r.status] || ROOM_COLOR.unknown);
+      room.mesh.material.opacity = r.status === 'unknown' ? 0.25 : 0.45;
+      room.label.element.className = r.status === 'occupied' ? 'label person' : 'label';
+      const here = live && insidePoly(loc.person[0], loc.person[1], room.poly);
+      room.label.element.textContent = r.status === 'occupied'
+        ? `${r.name} · ${here ? 'PERSON' : 'recent motion'} ${Math.round(r.confidence * 100)}%`
+        : r.status === 'empty' ? `${r.name} · clear` : `${r.name} · not checked`;
+    }
+  }
+
+  // robots (live camera positions)
+  const seenRobots = new Set();
+  for (const r of scan.robots) {
+    if (r.x === null) continue;
+    seenRobots.add(r.id);
+    const rb = ensureRobot(r.id);
+    rb.target.set(r.x - center[0], 0, r.y - center[1]);
+    if (!rb.placed) { rb.group.position.copy(rb.target); rb.placed = true; }
+    rb.ring.visible = r.stopped;
+    rb.label.element.textContent = `Robot ${r.id} · ` + (r.stop_done ? 'done' : r.stopped ? 'listening' : 'moving');
+  }
+  for (const [id, rb] of robots) { rb.group.visible = seenRobots.has(id); rb.label.visible = seenRobots.has(id); }
+
+  // fixed boards (robot-mounted boards are drawn as robots)
+  for (const [mac, p] of Object.entries(pos)) {
+    if (robotMacs.has(mac)) { if (boards.has(mac)) { boards.get(mac).group.visible = false; boards.get(mac).label.visible = false; } continue; }
+    const b = ensureBoard(mac);
+    b.group.visible = true; b.label.visible = true;
+    b.group.position.set(p[0] - center[0], 0, p[1] - center[1]);
+    b.led.material.color.copy(liveMacs.has(mac) ? C.ledOn : C.ledOff);
+    b.label.element.textContent = mac.slice(-5) + (usb.has(mac) ? ' · USB' : '');
+  }
+  // links
+  const seen = new Set();
+  for (const p of loc.pairs || []) {
+    const key = p.a + '|' + p.b;
+    seen.add(key);
+    const l = ensureLink(key);
+    placeLink(l, [p.a_pos[0] - center[0], p.a_pos[1] - center[1]], [p.b_pos[0] - center[0], p.b_pos[1] - center[1]],
+      robotMacs.has(p.a) ? ROBOT_BOARD_Y : BOARD_Y, robotMacs.has(p.b) ? ROBOT_BOARD_Y : BOARD_Y);
+    l.ratio = p.ratio;
+  }
+  for (const [key, l] of links) if (!seen.has(key)) { l.mesh.visible = false; l.ratio = 0; }
+  updateHeat(loc.grid, center);
+
+  // the marker: where the links place the person, while motion is detected and for
+  // MARKER_HOLD_MS after, so a short gap between detections doesn't make it flicker
+  const nowMs = performance.now();
+  if (live) { markerSeen = nowMs; markerAt = loc.person; }
+  const show = markerAt !== null && nowMs - markerSeen <= MARKER_HOLD_MS && st.summary.calibrating === null;
+  if (show) {
+    person.target.set(markerAt[0] - center[0], 0, markerAt[1] - center[1]);
+    if (!person.group.visible) person.group.position.copy(person.target);
+    person.label.element.textContent = `PERSON · x ${markerAt[0].toFixed(1)}, y ${markerAt[1].toFixed(1)} m`;
+  }
+  showPerson(person, show);
+
+  // frame the scene once
+  const framePts = fp ? fp.rooms.flatMap(r => r.polygon) : Object.values(pos);
+  if (!framed && framePts.length) {
+    const xs = framePts.map(p => p[0] - center[0]), zs = framePts.map(p => p[1] - center[1]);
+    const span = Math.max(2, Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs));
+    camera.position.set(span * 0.9, span * 1.1, span * 1.5);
+    controls.target.set(0, 0.6, 0);
+    framed = true;
+  }
+  renderHud(st, pos, usb, liveMacs);
+}
+
+function renderHud(st, pos, usb, liveMacs) {
+  const s = st.summary;
+  const el = document.getElementById('state'), txt = document.getElementById('stateText'), sub = document.getElementById('stateSub');
+  const nLinks = (st.links || []).length;
+  if (!s.linked) { el.className = 'state'; txt.textContent = 'No links yet'; sub.textContent = 'Boards are not hearing each other.'; }
+  else if (s.warmup !== null) { el.className = 'state warn'; txt.textContent = 'Step back from the boards';
+    sub.textContent = `Calibration starts in ${Math.ceil(s.warmup)} s.`; }
+  else if (s.calibrating !== null) { el.className = 'state warn'; txt.textContent = 'Calibrating';
+    sub.textContent = `Learning background activity… ${Math.ceil(s.calibrating)} s (${nLinks} links)`; }
+  else if (st.floorplan) {
+    const scan = st.scan || { rooms: [], detections: [] };
+    const checked = scan.rooms.filter(r => r.status !== 'unknown').length;
+    const p = (st.localization || {}).person;
+    if (s.detected && p) { el.className = 'state crit'; txt.textContent = 'PERSON DETECTED';
+      sub.textContent = `at x = ${p[0].toFixed(1)} m, y = ${p[1].toFixed(1)} m` +
+        (scan.detections.length ? ' · ' + scan.detections.join(' · ') : ''); }
+    else if (scan.detections.length) { el.className = 'state warn'; txt.textContent = 'Recent motion';
+      sub.textContent = scan.detections.join(' · ') + ' · nothing moving right now'; }
+    else if (checked < scan.rooms.length) { el.className = 'state warn'; txt.textContent = 'Searching';
+      sub.textContent = `${checked} of ${scan.rooms.length} rooms checked · ${nLinks} links live`; }
+    else { el.className = 'state good'; txt.textContent = 'All rooms clear';
+      sub.textContent = `${scan.rooms.length} rooms checked · ${nLinks} links live`; }
+  }
+  else if (s.detected) { el.className = 'state crit'; txt.textContent = 'PERSON DETECTED';
+    const loc = st.localization || {};
+    sub.textContent = loc.person ? `At x=${loc.person[0].toFixed(1)} m, y=${loc.person[1].toFixed(1)} m · confidence ${Math.round(s.confidence * 100)}%`
+                                 : `Position unknown · confidence ${Math.round(s.confidence * 100)}%`; }
+  else { el.className = 'state good'; txt.textContent = 'No one detected'; sub.textContent = `${nLinks} links live`; }
+
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const rows = Object.entries(pos).sort().map(([mac, p]) =>
+    `<tr><td>${esc(mac.slice(-5))}${usb.has(mac) ? '<span class="usb">USB</span>' : ''}</td>` +
+    `<td>x ${p[0].toFixed(1)} m</td><td>y ${p[1].toFixed(1)} m</td>` +
+    `<td>${liveMacs.has(mac) ? 'heard' : '<span style="color:var(--text-muted)">silent</span>'}</td></tr>`);
+  document.getElementById('boardTable').innerHTML = rows.join('') || '<tr><td>none yet</td></tr>';
+  document.getElementById('boardNote').innerHTML = st.floorplan
+    ? 'Fixed boards from <b>host/floorplan.json</b>; robots from the overhead camera.'
+    : 'Positions (metres) come from <b>host/layout.json</b>. Edit it to match where each board really is; the view updates within a second.';
+}
+
+// ---- animation ---------------------------------------------------------------
+const clock = new THREE.Clock();
+function frame() {
+  requestAnimationFrame(frame);
+  const t = clock.getElapsedTime();
+  for (const l of links.values()) {
+    if (!l.mesh.visible) continue;
+    const r = Math.max(0, l.ratio || 0);
+    const k = Math.min(1, Math.max(0, (r - 0.8) / 1.2));          // 0 quiet .. 1 strongly disturbed
+    l.mesh.material.color.copy(C.quiet).lerp(C.hot, k);
+    l.mesh.material.opacity = 0.3 + 0.6 * k;
+    const radius = 0.012 + 0.03 * k * (1 + 0.25 * Math.sin(t * 8));
+    l.mesh.scale.set(radius, l.len || 1, radius);
+  }
+  if (person.group.visible) {
+    person.group.position.lerp(person.target, 0.15);
+    person.ring.scale.setScalar(1 + 0.25 * Math.sin(t * 4));
+  }
+  for (const rb of robots.values()) {
+    if (!rb.group.visible) continue;
+    rb.group.position.lerp(rb.target, 0.15);
+    rb.ring.scale.setScalar(1 + 0.1 * Math.sin(t * 3));
+  }
+  const pulse = 0.4 + 0.15 * Math.sin(t * 3);   // occupied rooms breathe
+  for (const room of rooms.values()) {
+    if (room.label.element.className.includes('person')) room.mesh.material.opacity = pulse;
+  }
+  if (performance.now() - lastMsg > 3000 && state) {
+    document.getElementById('state').className = 'state';
+    document.getElementById('stateText').textContent = 'Lost connection to server';
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  labels.render(scene, camera);
+}
+frame();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  labels.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>

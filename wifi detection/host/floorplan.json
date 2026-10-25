@@ -1,0 +1,60 @@
+{
+  "comment": "Search area 197.0 x 238.0 cm (set by wifi_area.py). Origin = front-left tape corner (laptop side); x to the right, y away from the laptop. Boards at waist height on the corners, 18 cm out from the tape in x and in y.",
+  "rooms": [
+    {
+      "name": "Search area",
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          1.97,
+          0
+        ],
+        [
+          1.97,
+          2.38
+        ],
+        [
+          0,
+          2.38
+        ]
+      ]
+    }
+  ],
+  "boards": {
+    "d0:cf:13:e1:2e:30": [
+      -0.18,
+      -0.18
+    ],
+    "d0:cf:13:e1:63:30": [
+      2.15,
+      -0.18
+    ],
+    "d0:cf:13:e1:66:2c": [
+      2.15,
+      2.56
+    ],
+    "d0:cf:13:e1:63:ac": [
+      -0.18,
+      2.56
+    ]
+  },
+  "walls": [],
+  "motion_half_life_s": 8,
+  "stops": [
+    {
+      "name": "Search area",
+      "a": [
+        1.255,
+        0.295
+      ],
+      "b": [
+        0.25,
+        0.295
+      ],
+      "listen_s": 15
+    }
+  ]
+}

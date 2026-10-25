@@ -1,0 +1,1 @@
+﻿Snapshot of the working version taken 2026-10-24 ~07:45, after live test 2 (user: 'best attempt so far'). To restore: copy host\, firmware\, docs\, README.md and run_dashboard.ps1 back over the live folder. Recordings were not copied (they stay in host\recordings).

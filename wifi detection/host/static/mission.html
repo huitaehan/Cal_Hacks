@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rescue Mission Map</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f3f3f1; --surface-1: #fcfcfb; --border: #e1e0db; --grid: #e7e6e2;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7c7b76;
+    --good: #0ca30c; --warning: #fab219; --critical: #d03b3b; --unknown: #8a8984;
+    --cardboard: #9a7444; --robot: #2a78d6; --link-quiet: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #111110; --surface-1: #1a1a19; --border: #2f2f2c; --grid: #2a2a28;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+      --unknown: #6d6c66; --cardboard: #b08d5a; --robot: #3987e5; --link-quiet: #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #111110; --surface-1: #1a1a19; --border: #2f2f2c; --grid: #2a2a28;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --unknown: #6d6c66; --cardboard: #b08d5a; --robot: #3987e5; --link-quiet: #3987e5;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text-primary);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: 1fr 320px; gap: 14px; }
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 18px; margin: 0; }
+  header a { color: var(--text-secondary); font-size: 13px; }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  canvas { display: block; width: 100%; }
+  h2 { margin: 0 0 8px; font-size: 14px; }
+  .room { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--grid); }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; border: 1px solid var(--border); margin-left: auto; }
+  .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .occupied { color: var(--critical); } .empty { color: var(--good); } .unknown { color: var(--text-muted); }
+  .det { font-weight: 650; color: var(--critical); margin: 4px 0; }
+  .muted { color: var(--text-muted); font-size: 12px; }
+  .warn { color: var(--warning); font-size: 12px; margin: 4px 0; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Rescue mission map</h1><a href="/3d">3D view</a><a href="/">sensor dashboard</a></header>
+  <section class="card"><canvas id="map" height="520" aria-label="Top-down floor plan with room status"></canvas></section>
+  <section class="card">
+    <h2>Detections</h2><div id="dets" class="muted">No one detected yet.</div>
+    <h2 style="margin-top:14px">Rooms</h2><div id="rooms"></div>
+    <h2 style="margin-top:14px">Robots</h2><div id="robots" class="muted">No robot positions yet.</div>
+    <div id="warnings"></div>
+  </section>
+</main>
+<script>
+(() => {
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  let state = null;
+
+  function sizeCanvas(c) {
+    const dpr = window.devicePixelRatio || 1;
+    // c.height assignment rewrites the attribute, so keep the CSS height separately (see index.html).
+    if (!c.dataset.cssHeight) c.dataset.cssHeight = c.getAttribute("height");
+    const w = c.clientWidth, h = parseInt(c.dataset.cssHeight, 10);
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+      c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); c.style.height = h + "px";
+    }
+    const ctx = c.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w, h };
+  }
+  function hexA(hex, a) { const v = parseInt(hex.slice(1), 16); return `rgba(${v >> 16 & 255},${v >> 8 & 255},${v & 255},${a})`; }
+
+  function render() {
+    const c = document.getElementById("map");
+    const { ctx, w, h } = sizeCanvas(c);
+    ctx.clearRect(0, 0, w, h);
+    const fp = state && state.floorplan;
+    if (!fp) {
+      ctx.fillStyle = css("--text-secondary"); ctx.font = "14px system-ui"; ctx.textAlign = "center";
+      ctx.fillText("No floor plan yet: copy host/floorplan.example.json to host/floorplan.json", w / 2, h / 2);
+      return;
+    }
+    const scan = state.scan, pos = (state.localization || {}).positions || {};
+    const pts = fp.rooms.flatMap(r => r.polygon).concat(Object.values(pos)).concat(scan.robots.filter(r => r.x !== null).map(r => [r.x, r.y]));
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    const x0 = Math.min(...xs) - 0.4, x1 = Math.max(...xs) + 0.4, y0 = Math.min(...ys) - 0.4, y1 = Math.max(...ys) + 0.4;
+    const s = Math.min(w / (x1 - x0), h / (y1 - y0));
+    const ox = (w - s * (x1 - x0)) / 2, oy = (h - s * (y1 - y0)) / 2;
+    const X = x => ox + (x - x0) * s, Y = y => h - (oy + (y - y0) * s);   // y up, like the camera frame
+
+    const status = Object.fromEntries(scan.rooms.map(r => [r.name, r]));
+    const col = { occupied: css("--critical"), empty: css("--good"), unknown: css("--unknown") };
+    for (const r of fp.rooms) {
+      const st = (status[r.name] || {}).status || "unknown";
+      ctx.beginPath();
+      r.polygon.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])));
+      ctx.closePath();
+      ctx.fillStyle = hexA(col[st], st === "unknown" ? 0.12 : 0.22);
+      ctx.fill();
+      const cx = r.polygon.reduce((a, p) => a + p[0], 0) / r.polygon.length;
+      const cy = r.polygon.reduce((a, p) => a + p[1], 0) / r.polygon.length;
+      ctx.fillStyle = css("--text-primary"); ctx.font = "600 13px system-ui"; ctx.textAlign = "center";
+      ctx.fillText(r.name, X(cx), Y(cy) - 8);
+      ctx.fillStyle = css("--text-secondary"); ctx.font = "12px system-ui";
+      ctx.fillText(st === "occupied" ? "PERSON" : st === "empty" ? "clear" : "not checked", X(cx), Y(cy) + 10);
+    }
+    ctx.strokeStyle = css("--cardboard"); ctx.lineWidth = 4; ctx.lineCap = "round";
+    for (const [a, b] of fp.walls) { ctx.beginPath(); ctx.moveTo(X(a[0]), Y(a[1])); ctx.lineTo(X(b[0]), Y(b[1])); ctx.stroke(); }
+
+    for (const p of (state.localization || {}).pairs || []) {
+      const k = Math.min(1, Math.max(0, (p.ratio - 0.8) / 1.2));
+      ctx.strokeStyle = k > 0 ? hexA(css("--critical"), 0.3 + 0.6 * k) : hexA(css("--link-quiet"), 0.35);
+      ctx.lineWidth = 1.5 + 3 * k;
+      ctx.beginPath(); ctx.moveTo(X(p.a_pos[0]), Y(p.a_pos[1])); ctx.lineTo(X(p.b_pos[0]), Y(p.b_pos[1])); ctx.stroke();
+    }
+    const robotMacs = new Set(scan.robots.map(r => r.mac));
+    for (const [mac, p] of Object.entries(pos)) {
+      if (robotMacs.has(mac)) continue;
+      ctx.fillStyle = css("--text-secondary");
+      ctx.fillRect(X(p[0]) - 6, Y(p[1]) - 4, 12, 8);
+      ctx.font = "11px system-ui"; ctx.textAlign = "center"; ctx.fillText(mac.slice(-5), X(p[0]), Y(p[1]) + 18);
+    }
+    for (const r of scan.robots) {
+      if (r.x === null) continue;
+      ctx.fillStyle = css("--robot");
+      ctx.beginPath(); ctx.arc(X(r.x), Y(r.y), 10, 0, Math.PI * 2); ctx.fill();
+      if (r.stopped) { ctx.strokeStyle = css("--robot"); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X(r.x), Y(r.y), 16, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.fillStyle = "#fff"; ctx.font = "700 11px system-ui"; ctx.textAlign = "center"; ctx.fillText(r.id, X(r.x), Y(r.y) + 4);
+    }
+  }
+
+  // Robot ids, MACs and warnings come from POST /api/robots (reachable on the LAN with -Network): escape them.
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const STATUS = new Set(["occupied", "empty", "unknown"]);
+
+  function renderSide() {
+    const scan = state.scan || { rooms: [], robots: [], detections: [], warnings: [] };
+    document.getElementById("dets").innerHTML = scan.detections.length
+      ? scan.detections.map(d => `<div class="det">${esc(d)}</div>`).join("") : '<span class="muted">No one detected yet.</span>';
+    document.getElementById("rooms").innerHTML = scan.rooms.map(r => {
+      const st = STATUS.has(r.status) ? r.status : "unknown";
+      const label = st === "occupied" ? `person ${Math.round(r.confidence * 100)}%` : st === "empty" ? `clear ${Math.round(r.confidence * 100)}%` : "not checked";
+      return `<div class="room">${esc(r.name)}<span class="chip ${st}">${label}</span></div>`;
+    }).join("");
+    document.getElementById("robots").innerHTML = scan.robots.length ? scan.robots.map(r =>
+      `<div class="room">Robot ${esc(r.id)}<span class="chip unknown">${!r.fresh ? "no position" : r.stop_done ? "done" : r.stopped ? "listening" : "moving"}</span></div>`).join("")
+      : "No robot positions yet.";
+    document.getElementById("warnings").innerHTML = scan.warnings.map(w => `<div class="warn">⚠ ${esc(w)}</div>`).join("");
+  }
+
+  const es = new EventSource("/events");
+  es.onmessage = ev => { state = JSON.parse(ev.data); render(); renderSide(); };
+  window.addEventListener("resize", () => state && render());
+})();
+</script>
+</body>
+</html>
