@@ -112,9 +112,9 @@ class OmniMotorNode(Node):
     def cmd_vel_callback(self, msg: Twist):
         self.last_cmd_time = self.get_clock().now()
 
-        # Invert linear and angular velocities to match physical robot orientation
-        vx = -msg.linear.x
-        vy = -msg.linear.y
+        # Standard linear velocity: positive linear.x drives straight forward
+        vx = msg.linear.x
+        vy = msg.linear.y
         w = -msg.angular.z  # Positive angular.z turns left (CCW)
 
         # Max linear speed from APF navigator is ~0.25 m/s. Normalize to [0.0, 1.0]
