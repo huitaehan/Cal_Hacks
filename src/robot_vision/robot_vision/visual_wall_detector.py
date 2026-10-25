@@ -116,6 +116,9 @@ class VisualWallDetector(Node):
         self.enable_fusion = bool(self.get_parameter('enable_sensor_fusion').value)
         self.latest_ultrasonic = 2.50
         self.has_ultrasonic = False
+        self.latest_us_center = None
+        self.latest_us_left = None
+        self.latest_us_right = None
 
         if self.enable_fusion:
             us_topic = str(self.get_parameter('ultrasonic_topic').value)
@@ -124,7 +127,12 @@ class VisualWallDetector(Node):
                 self.us_sub = self.create_subscription(Float32, us_topic, self._us_float_cb, 10)
             else:
                 self.us_sub = self.create_subscription(Range, us_topic, self._us_range_cb, 10)
-            self.get_logger().info(f"Sensor Fusion enabled: Subscribed to ultrasonic distance on '{us_topic}'")
+
+            # Auto-subscribe to triple ultrasonic topics from ultrasonic_node.py
+            self.sub_us_center = self.create_subscription(Float32, 'ultrasonic_center', self._us_center_cb, 10)
+            self.sub_us_left = self.create_subscription(Float32, 'ultrasonic_left', self._us_left_cb, 10)
+            self.sub_us_right = self.create_subscription(Float32, 'ultrasonic_right', self._us_right_cb, 10)
+            self.get_logger().info(f"Sensor Fusion enabled: Subscribed to '{us_topic}' and 'ultrasonic_center/left/right'")
 
         # ----------------------------------------------------
         # QoS Profile Configuration
@@ -174,11 +182,33 @@ class VisualWallDetector(Node):
         if msg.range > 0.0:
             self.latest_ultrasonic = float(msg.range)
             self.has_ultrasonic = True
+            self.latest_us_center = float(msg.range)
 
     def _us_float_cb(self, msg: Float32):
         if msg.data > 0.0:
-            self.latest_ultrasonic = float(msg.data)
+            val = float(msg.data)
+            m = val / 100.0 if val > 5.0 else val
+            self.latest_ultrasonic = m
             self.has_ultrasonic = True
+            self.latest_us_center = m
+
+    def _us_center_cb(self, msg: Float32):
+        if msg.data > 0.0:
+            val = float(msg.data)
+            m = val / 100.0 if val > 5.0 else val
+            self.latest_ultrasonic = m
+            self.has_ultrasonic = True
+            self.latest_us_center = m
+
+    def _us_left_cb(self, msg: Float32):
+        if msg.data > 0.0:
+            val = float(msg.data)
+            self.latest_us_left = val / 100.0 if val > 5.0 else val
+
+    def _us_right_cb(self, msg: Float32):
+        if msg.data > 0.0:
+            val = float(msg.data)
+            self.latest_us_right = val / 100.0 if val > 5.0 else val
 
     def compressed_image_callback(self, msg: CompressedImage):
         try:
@@ -252,15 +282,19 @@ class VisualWallDetector(Node):
         dist_right = self._estimate_distance_from_sector(sector_right, roi_h, den_right, 'side')
 
         # ----------------------------------------------------
-        # 5. Sensor Fusion: Pessimistic Minimum Envelope for Front Clearance
+        # 5. Sensor Fusion: Pessimistic Minimum Envelope for Clearances
         # Combines Camera floor horizon detection with Ultrasonic Time-of-Flight
+        # (Front, Left, and Right sectors)
         # ----------------------------------------------------
-        fused_center = float(min(dist_center, self.latest_ultrasonic)) if self.has_ultrasonic else float(dist_center)
+        center_sensor = self.latest_us_center if self.latest_us_center is not None else (self.latest_ultrasonic if self.has_ultrasonic else None)
+        fused_center = float(min(dist_center, center_sensor)) if center_sensor is not None else float(dist_center)
+        fused_left = float(min(dist_left, self.latest_us_left)) if self.latest_us_left is not None else float(dist_left)
+        fused_right = float(min(dist_right, self.latest_us_right)) if self.latest_us_right is not None else float(dist_right)
 
         obs_msg = Vector3()
         obs_msg.x = float(fused_center)  # Front clearance (fused)
-        obs_msg.y = float(dist_left)     # Left clearance
-        obs_msg.z = float(dist_right)    # Right clearance
+        obs_msg.y = float(fused_left)    # Left clearance (fused)
+        obs_msg.z = float(fused_right)   # Right clearance (fused)
         self.obstacle_pub.publish(obs_msg)
 
         # ----------------------------------------------------
