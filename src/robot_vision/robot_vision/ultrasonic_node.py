@@ -3,20 +3,27 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32
 
-# Attempt clean hardware pin reset to release any lingering locks
-try:
-    import RPi.GPIO as GPIO
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setwarnings(False)
-    GPIO.cleanup([23, 24, 17, 27, 5, 6])
-except Exception:
-    pass
+# Unexport any stale sysfs pins to prevent lgpio 'GPIO busy' kernel collisions
+import os
+import time
+for pin in (23, 24, 17, 27, 5, 6):
+    try:
+        if os.path.exists(f'/sys/class/gpio/gpio{pin}'):
+            with open('/sys/class/gpio/unexport', 'w') as f:
+                f.write(str(pin))
+    except Exception:
+        pass
 
-# Prefer RPiGPIOFactory when available to avoid lgpio kernel lockouts
+# Free any lingering lgpio lines if handle was kept open
 try:
-    from gpiozero.pins.rpigpio import RPiGPIOFactory
-    from gpiozero import Device
-    Device.pin_factory = RPiGPIOFactory()
+    import lgpio
+    _h = lgpio.gpiochip_open(0)
+    for _p in (23, 24, 17, 27, 5, 6):
+        try:
+            lgpio.gpio_free(_h, _p)
+        except Exception:
+            pass
+    lgpio.gpiochip_close(_h)
 except Exception:
     pass
 
@@ -34,41 +41,66 @@ class MultiUltrasonicPublisher(Node):
         
         self.timer = self.create_timer(0.2, self.timer_callback)
         
-        # Initialize the three sensors with their respective BCM pins
-        self.sensor_center = DistanceSensor(echo=24, trigger=23)
-        self.sensor_left = DistanceSensor(echo=27, trigger=17)
-        self.sensor_right = DistanceSensor(echo=6, trigger=5)
-        
-        self.get_logger().info('Triple Ultrasonic Node has started.')
+        # Initialize sensors with per-sensor retry resilience
+        self.sensor_center = None
+        self.sensor_left = None
+        self.sensor_right = None
+
+        for attempt in range(3):
+            if self.sensor_center is None:
+                try:
+                    self.sensor_center = DistanceSensor(echo=24, trigger=23)
+                    self.get_logger().info('Center Ultrasonic initialized (23/24)')
+                except Exception as e:
+                    if attempt == 2:
+                        self.get_logger().warn(f'Center Ultrasonic init: {e}')
+            if self.sensor_left is None:
+                try:
+                    self.sensor_left = DistanceSensor(echo=27, trigger=17)
+                    self.get_logger().info('Left Ultrasonic initialized (17/27)')
+                except Exception as e:
+                    if attempt == 2:
+                        self.get_logger().warn(f'Left Ultrasonic init: {e}')
+            if self.sensor_right is None:
+                try:
+                    self.sensor_right = DistanceSensor(echo=6, trigger=5)
+                    self.get_logger().info('Right Ultrasonic initialized (5/6)')
+                except Exception as e:
+                    if attempt == 2:
+                        self.get_logger().warn(f'Right Ultrasonic init: {e}')
+            if self.sensor_center and self.sensor_left and self.sensor_right:
+                break
+            time.sleep(0.2)
 
     def timer_callback(self):
-        # Read and publish Center
-        msg_c = Float32()
-        msg_c.data = float(self.sensor_center.distance * 100.0)
-        self.pub_center.publish(msg_c)
+        if self.sensor_center:
+            try:
+                msg_c = Float32(data=float(self.sensor_center.distance * 100.0))
+                self.pub_center.publish(msg_c)
+            except Exception:
+                pass
 
-        # Read and publish Left
-        msg_l = Float32()
-        msg_l.data = float(self.sensor_left.distance * 100.0)
-        self.pub_left.publish(msg_l)
+        if self.sensor_left:
+            try:
+                msg_l = Float32(data=float(self.sensor_left.distance * 100.0))
+                self.pub_left.publish(msg_l)
+            except Exception:
+                pass
 
-        # Read and publish Right
-        msg_r = Float32()
-        msg_r.data = float(self.sensor_right.distance * 100.0)
-        self.pub_right.publish(msg_r)
+        if self.sensor_right:
+            try:
+                msg_r = Float32(data=float(self.sensor_right.distance * 100.0))
+                self.pub_right.publish(msg_r)
+            except Exception:
+                pass
 
     def destroy_node(self):
-        try:
-            self.sensor_center.close()
-            self.sensor_left.close()
-            self.sensor_right.close()
-        except Exception:
-            pass
-        try:
-            import RPi.GPIO as GPIO
-            GPIO.cleanup()
-        except Exception:
-            pass
+        for s in [self.sensor_center, self.sensor_left, self.sensor_right]:
+            if s is not None:
+                try:
+                    s.close()
+                except Exception:
+                    pass
         super().destroy_node()
 
 
