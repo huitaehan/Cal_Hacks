@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'vision_node = robot_vision.vision_node:main',
             'visual_wall_detector = robot_vision.visual_wall_detector:main',
+            'mock_camera = robot_vision.mock_camera_publisher:main',
             'ultrasonic_node = robot_vision.ultrasonic_node:main',
             'pi_streamer = robot_vision.pi_client:main',
             'test_camera = robot_vision.test_camera:main',

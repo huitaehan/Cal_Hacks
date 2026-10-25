@@ -12,12 +12,34 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Vector3, Point
 from nav_msgs.msg import Odometry
-from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import numpy as np
 import math
 import time
 from typing import Optional
+
+try:
+    from cv_bridge import CvBridge, CvBridgeError
+except ImportError:
+    class CvBridgeError(Exception):
+        pass
+
+    class CvBridge:
+        def imgmsg_to_cv2(self, img_msg, desired_encoding='bgr8'):
+            dtype = np.uint8
+            n_channels = 3
+            if img_msg.encoding in ['mono8', '8UC1']:
+                n_channels = 1
+            elif img_msg.encoding in ['bgr8', 'rgb8', '8UC3']:
+                n_channels = 3
+            elif img_msg.encoding in ['bgra8', 'rgba8', '8UC4']:
+                n_channels = 4
+            im = np.frombuffer(img_msg.data, dtype=dtype).reshape((img_msg.height, img_msg.width, n_channels))
+            if n_channels == 1:
+                im = im.reshape((img_msg.height, img_msg.width))
+            elif img_msg.encoding == 'rgb8' and desired_encoding == 'bgr8':
+                im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
+            return im
 
 from robot_vision.detector import VictimDetector, Detection
 
