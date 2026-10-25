@@ -219,7 +219,7 @@ class VisualWallDetector(Node):
             return
 
         if frame is not None and frame.size > 0:
-            self.process_frame(frame)
+            self.process_frame(frame, msg.header)
 
     def image_callback(self, msg: Image):
         try:
@@ -230,9 +230,9 @@ class VisualWallDetector(Node):
             return
 
         if frame is not None and frame.size > 0:
-            self.process_frame(frame)
+            self.process_frame(frame, msg.header)
 
-    def process_frame(self, frame):
+    def process_frame(self, frame, header=None):
         h, w = frame.shape[:2]
 
         # ----------------------------------------------------
@@ -338,7 +338,11 @@ class VisualWallDetector(Node):
             )
             try:
                 debug_msg = self.bridge.cv2_to_imgmsg(debug_frame, encoding='bgr8')
-                debug_msg.header = msg.header
+                if header is not None:
+                    debug_msg.header = header
+                else:
+                    debug_msg.header.stamp = self.get_clock().now().to_msg()
+                    debug_msg.header.frame_id = 'camera_optical_link'
                 self.debug_pub.publish(debug_msg)
             except CvBridgeError as e:
                 self.get_logger().warn(f"Failed to publish debug image: {e}")
