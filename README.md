@@ -186,8 +186,8 @@ Cal_Hacks/
 
 ---
 
-## 👥 Contributors & Team (CalHacks 13.0)
-* **Huitae Han** — Autonomous Robotics, APF Navigation Engine, Edge Computer Vision & Multi-Sensor Fusion
-* **Mohamed Cherif** — Wi-Fi CSI RF Sensing, ESP32-C5 Firmware, Signal Processing & 3D WebGL Digital Twin
-* **Taehoon** — Voice AI Dispatcher, Cartesia Low-Latency Audio Streaming & Real-Time Incident Architecture
-* **Hemakshi** — SpacetimeDB Real-Time State Synchronization, Incident Triage Console & System Integration
+## 👥 Team Members (CalHacks 13.0)
+* **Huitae Han**
+* **Cherif**
+* **Taehoon**
+* **Hemakshi**
