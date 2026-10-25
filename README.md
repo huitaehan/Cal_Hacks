@@ -186,7 +186,8 @@ Cal_Hacks/
 
 ---
 
-## 👥 Contributors & Team
-* **Huitae Han** — Autonomous Robotics, APF Navigation, Computer Vision, Sensor Fusion & Edge Deployment
+## 👥 Contributors & Team (CalHacks 13.0)
+* **Huitae Han** — Autonomous Robotics, APF Navigation Engine, Edge Computer Vision & Multi-Sensor Fusion
 * **Mohamed Cherif** — Wi-Fi CSI RF Sensing, ESP32-C5 Firmware, Signal Processing & 3D WebGL Digital Twin
-* **Team CalHacks 13.0** — Search-and-Rescue Robotics Challenge
+* **Taehoon** — Voice AI Dispatcher, Cartesia Low-Latency Audio Streaming & Real-Time Incident Architecture
+* **Hemakshi** — SpacetimeDB Real-Time State Synchronization, Incident Triage Console & System Integration
