@@ -112,7 +112,10 @@ class VisualWallDetector(Node):
         model_file = str(self.get_parameter('yolo_model').value)
         self.detector = VictimDetector(model_name=model_file) if self.enable_victim else None
 
-        # Ultrasonic Sensor Fusion State
+        # State Attributes
+        self.cam_dist_front = 2.0
+        self.cam_dist_left = 2.0
+        self.cam_dist_right = 2.0
         self.enable_fusion = bool(self.get_parameter('enable_sensor_fusion').value)
         self.latest_ultrasonic = 2.50
         self.has_ultrasonic = False
@@ -120,6 +123,24 @@ class VisualWallDetector(Node):
         self.latest_us_left = None
         self.latest_us_right = None
 
+        # ----------------------------------------------------
+        # Publishers (Created FIRST so callbacks never fail)
+        # ----------------------------------------------------
+        # /obstacle_status: Vector3 (x=front_clearance, y=left_clearance, z=right_clearance in meters)
+        self.obstacle_pub = self.create_publisher(Vector3, obs_topic, 10)
+
+        # /detected_person: Point (x=dist_meters, y=bearing_deg, z=confidence)
+        self.victim_pub = self.create_publisher(Point, '/detected_person', 10)
+
+        # /vision/wall_debug: Processed annotated debug image for RViz2 / web monitoring
+        if self.publish_debug:
+            self.debug_pub = self.create_publisher(Image, debug_topic, 2)
+        else:
+            self.debug_pub = None
+
+        # ----------------------------------------------------
+        # Subscriptions
+        # ----------------------------------------------------
         if self.enable_fusion:
             us_topic = str(self.get_parameter('ultrasonic_topic').value)
             us_type = str(self.get_parameter('ultrasonic_msg_type').value).lower()
@@ -137,20 +158,7 @@ class VisualWallDetector(Node):
             self.sub_us_right2 = self.create_subscription(Float32, '/ultrasonic_right', self._us_right_cb, 10)
             self.get_logger().info(f"Sensor Fusion enabled: Subscribed to '{us_topic}' and 'ultrasonic_center/left/right'")
 
-        # Camera sector clearances default
-        self.cam_dist_front = 2.0
-        self.cam_dist_left = 2.0
-        self.cam_dist_right = 2.0
-
-        # Periodic timer (10Hz) to guarantee /obstacle_status is always published
-        # even if camera stream is temporarily idle or ultrasonic is solo
-        self.fusion_timer = self.create_timer(0.1, self._publish_fused_clearances)
-
-        # ----------------------------------------------------
-        # QoS Profile Configuration
-        # v4l2_camera in ROS 2 commonly publishes on BEST_EFFORT or RELIABLE.
-        # BestEffort QoS profile prevents DDS dropouts across the local WiFi.
-        # ----------------------------------------------------
+        # QoS Profile Configuration for camera
         qos_camera = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
@@ -175,19 +183,12 @@ class VisualWallDetector(Node):
             qos_camera
         )
 
-        # Publishers
-        # /obstacle_status: Vector3 (x=front_clearance, y=left_clearance, z=right_clearance in meters)
-        self.obstacle_pub = self.create_publisher(Vector3, obs_topic, 10)
-
-        # /detected_person: Point (x=dist_meters, y=bearing_deg, z=confidence)
-        self.victim_pub = self.create_publisher(Point, '/detected_person', 10)
-
-        # /vision/wall_debug: Processed annotated debug image for RViz2 / web monitoring
-        if self.publish_debug:
-            self.debug_pub = self.create_publisher(Image, debug_topic, 2)
+        # Periodic timer (10Hz) to guarantee /obstacle_status is always published continuously
+        self.fusion_timer = self.create_timer(0.1, self._publish_fused_clearances)
 
         self.get_logger().info(
             f"VisualWallDetector initialized. Subscribed to '{raw_topic}' & '{comp_topic}', publishing to '{obs_topic}'"
+        )
         )
 
     def _publish_fused_clearances(self):
